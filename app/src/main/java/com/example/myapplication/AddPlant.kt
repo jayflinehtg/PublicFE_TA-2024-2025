@@ -28,11 +28,14 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
+import com.example.myapplication.MainViewModel
+import com.example.myapplication.data.AddPlantResult
 import com.example.myapplication.data.DataClassResponses.AddPlantRequest
 import com.example.myapplication.data.IPFSResponse
 import com.example.myapplication.data.PreferencesHelper
 import com.example.myapplication.services.ApiService
 import com.example.myapplication.services.RetrofitClient
+import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -46,9 +49,11 @@ import java.io.FileOutputStream
 fun AddPlant(
     navController: NavController,
     viewModel: PlantViewModel = hiltViewModel(),
-    apiService: ApiService = RetrofitClient.apiService
+    mainViewModel: MainViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     var namaTanaman by remember { mutableStateOf("") }
     var namaLatin by remember { mutableStateOf("") }
     var komposisi by remember { mutableStateOf("") }
@@ -58,14 +63,46 @@ fun AddPlant(
     var efekSamping by remember { mutableStateOf("") }
 
     var gambarUri by remember { mutableStateOf<Uri?>(null) }
+    var ipfsCid by remember { mutableStateOf("") }
     var showError by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
-    // Ambil CID dari ViewModel
-    val cid = viewModel.cid.value
+
+    val plantUiState by viewModel.uiState
+    val mainUiState by mainViewModel.uiState.collectAsState()
+    val addPlantState = plantUiState.addPlantState
+
+    val isLoggedIn = mainUiState.isLoggedIn
+    val isFormEnabled = !plantUiState.isLoading && isLoggedIn
+
+    val token = mainViewModel.userToken
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
-    ) { uri -> gambarUri = uri }
+    ) { uri: Uri? ->
+        gambarUri = uri
+        ipfsCid = "" // Reset CID setiap kali gambar baru dipilih
+    }
+
+    LaunchedEffect(addPlantState) {
+        when (addPlantState) {
+            is AddPlantResult.Success -> {
+                Toast.makeText(context, addPlantState.message, Toast.LENGTH_LONG).show()
+                // Navigasi kembali ke home setelah sukses
+                navController.navigate("home") {
+                    popUpTo("addplant") { inclusive = true }
+                }
+                viewModel.resetAddPlantState() // Reset state
+            }
+
+            is AddPlantResult.Error -> {
+                Toast.makeText(context, addPlantState.errorMessage, Toast.LENGTH_LONG).show()
+                viewModel.resetAddPlantState() // Reset state
+            }
+
+            else -> {
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -112,19 +149,25 @@ fun AddPlant(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Judul "Gambar Tanaman" dengan warna hitam
-                Text("Gambar Tanaman", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.Black)
+                // Judul "Gambar Tanaman"
+                Text(
+                    "Gambar Tanaman",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Black
+                )
 
                 // Button untuk memilih gambar
                 Button(
                     onClick = { pickImageLauncher.launch("image/*") },
+                    enabled = isFormEnabled,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF81C784)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Pilih Gambar", color = Color.White) // Warna teks pada button
+                    Text("Pilih Gambar", color = Color.White)
                 }
 
-                // Menampilkan preview gambar jika ada
+                // Menampilkan preview gambar kalau ada
                 gambarUri?.let { uri ->
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("Preview Gambar:", fontWeight = FontWeight.Medium, color = Color.Black)
@@ -132,14 +175,11 @@ fun AddPlant(
                     Image(
                         painter = rememberAsyncImagePainter(uri),
                         contentDescription = "Preview Gambar Tanaman",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                            .padding(4.dp)
+                        modifier = Modifier.fillMaxWidth().height(250.dp).padding(8.dp)
                     )
                 }
 
-                // Menampilkan error jika gambar tidak ada
+                // Menampilkan error kalau gambar tidak ada
                 if (showError && gambarUri == null) {
                     Text(
                         text = "Gambar tidak boleh kosong",
@@ -152,118 +192,43 @@ fun AddPlant(
                 // Button Konfirmasi
                 Button(
                     onClick = {
-                        if (gambarUri == null) {
-                            showError = true
-                            return@Button
-                        }
-
-                        // Cek URI gambar sebelum upload
-                        Log.d("AddIPFS", "Selected image URI: ${gambarUri?.path}")
-
-                        showError = false
-                        isUploading = true
-
-                        val jwtTokenRaw = PreferencesHelper.getJwtToken(context)
-                        val jwtToken = "Bearer ${jwtTokenRaw ?: ""}"
-
-                        // Tambahkan log untuk melihat JWT Token
-                        Log.d("AddIPFS", "JWT Token: $jwtToken")
-
-                        val maxSizeInBytes = 5 * 1024 * 1024 // 5 MB dalam byte
-                        val tempFile = gambarUri?.let { uri ->
-                            try {
-                                val contentResolver = context.contentResolver
-                                val mimeType = contentResolver.getType(uri)
-
-                                // Validasi MIME hanya gambar yang diperbolehkan
-                                if (mimeType?.startsWith("image/") != true) {
-                                    Toast.makeText(context, "Tipe file tidak valid, hanya gambar yang diperbolehkan", Toast.LENGTH_SHORT).show()
-                                    return@let null // Kembalikan null jika file bukan gambar
+                        // 1. Validasi awal di UI: Pastikan gambar sudah dipilih
+                        gambarUri?.let { uri ->
+                            scope.launch {
+                                isUploading = true
+                                val jwtToken = PreferencesHelper.getJwtToken(context)?.let { "Bearer $it" } ?: ""
+                                if (token.isBlank()) {
+                                    Toast.makeText(context, "Sesi tidak valid.", Toast.LENGTH_SHORT).show()
+                                    isUploading = false
+                                    return@launch
                                 }
 
-                                val inputStream = contentResolver.openInputStream(uri)
-                                val fileName = "uploaded_image_${System.currentTimeMillis()}.jpg"
-                                val tempFile = File(context.cacheDir, fileName)
-
-                                inputStream?.use { input ->
-                                    FileOutputStream(tempFile).use { output ->
-                                        input.copyTo(output)
-                                    }
+                                try {
+                                    // 2. Panggil fungsi upload di ViewModel (yang sudah berisi validasi ukuran)
+                                    val newCid = viewModel.performUploadImage(token, uri)
+                                    ipfsCid = newCid
+                                    Toast.makeText(context, "Gambar berhasil dikonfirmasi!", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    // Tangkap error dari ViewModel (misal validasi ukuran gagal)
+                                    Toast.makeText(context, e.message ?: "Gagal mengunggah gambar.", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    isUploading = false
                                 }
-
-                                // Mengecek ukuran file
-                                if (tempFile.length() > maxSizeInBytes) {
-                                    Log.e("AddIPFS", "File terlalu besar, maksimal 5MB")
-                                    Toast.makeText(context, "File terlalu besar, maksimal 5MB", Toast.LENGTH_SHORT).show()
-                                    return@let null // Kembalikan null jika file terlalu besar
-                                } else {
-                                    Log.d("AddIPFS", "File berhasil dibuat: ${tempFile.absolutePath}")
-                                }
-
-                                // Cek apakah file berhasil dibuat
-                                if (tempFile.exists()) {
-                                    Log.d("AddIPFS", "File berhasil dibuat di: ${tempFile.absolutePath}")
-                                } else {
-                                    Log.e("AddIPFS", "File tidak ada setelah disalin")
-                                }
-
-                                tempFile
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                Log.e("AddIPFS", "Error saat membuat file: ${e.message}")
-                                null
                             }
-                        }
-
-                        // Pastikan file tidak null sebelum upload
-                        tempFile?.let { file ->
-                            val requestBody = file.asRequestBody("image/*".toMediaTypeOrNull())
-                            val filePart = MultipartBody.Part.createFormData("file", file.name, requestBody)
-
-                            apiService.uploadImage(jwtToken, filePart).enqueue(object : Callback<IPFSResponse> {
-                                override fun onResponse(call: Call<IPFSResponse>, response: Response<IPFSResponse>) {
-                                    Log.d("AddIPFS", "Response received: ${response.code()} ${response.body()}")
-                                    if (!response.isSuccessful) {
-                                        Log.e("AddIPFS", "Error: ${response.errorBody()?.string()}")
-                                    }
-                                    isUploading = false
-                                    if (response.isSuccessful) {
-                                        response.body()?.let { ipfsResponse ->
-                                            val newCid = ipfsResponse.cid
-                                            viewModel.setCid(newCid)  // Menyimpan CID ke ViewModel
-                                            Toast.makeText(context, "Gambar berhasil diupload!", Toast.LENGTH_SHORT).show()
-                                        }
-                                    } else {
-                                        Toast.makeText(context, "Gagal mengunggah gambar ke IPFS", Toast.LENGTH_SHORT).show()
-                                    }
-                                    file.delete()
-                                }
-
-                                override fun onFailure(call: Call<IPFSResponse>, t: Throwable) {
-                                    isUploading = false
-                                    Log.e("AddIPFS", "Upload failed: ${t.message}")
-                                    Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            })
-                        } ?: run {
-                            // Menangani kasus ketika file tidak berhasil dibuat
-                            Toast.makeText(context, "Gagal membuat file dari URI", Toast.LENGTH_SHORT).show()
-                            isUploading = false
-                        }
+                        } ?: Toast.makeText(context, "Pilih gambar terlebih dahulu.", Toast.LENGTH_SHORT).show()
                     },
-                    enabled = !isUploading,
+                    enabled = isFormEnabled && gambarUri != null && ipfsCid.isEmpty(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().height(50.dp).padding(top = 8.dp),
                     shape = RoundedCornerShape(50)
                 ) {
-                    Text(
-                        text = if (isUploading) "Sedang Upload..." else "Konfirmasi Gambar",
-                        fontSize = 14.sp,
-                        color = Color.White
-                    )
+                    if (isUploading) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                    } else if (ipfsCid.isNotEmpty()) {
+                        Text("Gambar Terkonfirmasi", color = Color.White)
+                    } else {
+                        Text("Konfirmasi Gambar", color = Color.White)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -271,56 +236,42 @@ fun AddPlant(
                 // Tombol simpan
                 Button(
                     onClick = {
-                        if (namaTanaman.isBlank() || namaLatin.isBlank() ||
-                            komposisi.isBlank() || manfaat.isBlank() ||
-                            caraPengolahan.isBlank() || cid.isBlank()
-                        ) {
-                            showError = true
-                            Toast.makeText(context, "Mohon lengkapi semua data dan lakukan konfirmasi gambar", Toast.LENGTH_SHORT).show()
-                        } else {
-                            showError = false
-
-                            val jwtTokenRaw = PreferencesHelper.getJwtToken(context)
-                            val jwtToken = jwtTokenRaw?.let {
-                                if (it.startsWith("Bearer ")) it else "Bearer $it"
-                            } ?: ""
-
-                            val request = AddPlantRequest(
-                                name = namaTanaman,
-                                namaLatin = namaLatin,
-                                komposisi = komposisi,
-                                kegunaan = manfaat,
-                                dosis = dosis,
-                                caraPengolahan = caraPengolahan,
-                                efekSamping = efekSamping,
-                                ipfsHash = cid
-                            )
-
-                            viewModel.addPlant(
-                                token = jwtToken,
-                                request = request,
-                                onSuccess = { response ->
-                                    Toast.makeText(context, "Tanaman berhasil ditambahkan!", Toast.LENGTH_SHORT).show()
-
-                                    viewModel.syncPlantToPublic(response.plantId)
-                                    viewModel.fetchPlantsByPage(1)
-                                    navController.navigate("home"){
-                                        popUpTo("addplant") { inclusive = true }
-                                    }
-                                },
-                                onError = { errorMessage ->
-                                    Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
-                                }
-                            )
+                        val token = PreferencesHelper.getJwtToken(context)?.let { "Bearer $it" } ?: ""
+                        if (token.isBlank()) {
+                            return@Button
                         }
+
+                        // Validasi semua field, termasuk CID yang sudah dikonfirmasi
+                        if (namaTanaman.isBlank() || namaLatin.isBlank() || komposisi.isBlank() ||
+                            manfaat.isBlank() || caraPengolahan.isBlank() || ipfsCid.isBlank()) {
+                            showError = true
+                            Toast.makeText(context, "Mohon lengkapi semua data dan konfirmasi gambar", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        showError = false
+
+                        val request = AddPlantRequest(
+                            name = namaTanaman,
+                            namaLatin = namaLatin,
+                            komposisi = komposisi,
+                            manfaat = manfaat,
+                            dosis = dosis,
+                            caraPengolahan = caraPengolahan,
+                            efekSamping = efekSamping,
+                            ipfsHash = ipfsCid // Gunakan CID dari state lokal
+                        )
+                        viewModel.performAddPlant(token, request)
                     },
+                    enabled = isFormEnabled,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
                     shape = RoundedCornerShape(50)
                 ) {
-                    Text("Simpan", color = Color.White)
+                    if (addPlantState is AddPlantResult.Loading) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                    } else {
+                        Text("Simpan", color = Color.White)
+                    }
                 }
             }
         }

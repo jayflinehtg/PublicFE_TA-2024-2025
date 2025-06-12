@@ -1,5 +1,7 @@
 package com.example.myapplication
 
+import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -11,438 +13,350 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.rememberAsyncImagePainter
-import kotlinx.coroutines.launch
+import com.example.myapplication.data.*
+import com.example.myapplication.services.RetrofitClient
 import java.text.SimpleDateFormat
 import java.util.*
-import android.graphics.BitmapFactory
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import com.example.myapplication.data.DataClassResponses
-import com.example.myapplication.services.ApiService
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailScreen(
     plantId: String,
-    token: String,
     onBack: () -> Unit,
-    onEdit: () -> Unit, // Fungsi untuk menavigasi ke screen edit
-    viewModel: PlantViewModel = hiltViewModel()
+    onEdit: () -> Unit,
+    viewModel: PlantViewModel = hiltViewModel(),
+    mainViewModel: MainViewModel = hiltViewModel()
 ) {
-    val backgroundColor = Color(0xFFEAF4E9)
-    val textColor = Color.Black
-    val cardColor = Color.White
-    val darkGreen = Color(0xFF498553)
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
-    val plant by viewModel.selectedPlant
-    val avgRating by viewModel.selectedRating
-    val comments by viewModel.plantComments
-    val ownerFullName by viewModel.ownerFullName
-    val userAddress by viewModel.userAddress // Ambil userAddress dari viewModel
+    // Mengobservasi state dari kedua ViewModel
+    val plantUiState by viewModel.uiState
+    val mainUiState by mainViewModel.uiState.collectAsState()
 
-    var comment by remember { mutableStateOf("") }
-    var likeCount by remember { mutableStateOf(0) }
-    var isLoading by remember { mutableStateOf(true) }
+    // Mendestrukturisasi state untuk kemudahan akses
+    val plant = plantUiState.selectedPlant
+    val avgRating = plantUiState.selectedRating
+    val comments = plantUiState.plantComments
+    val ownerFullName = plantUiState.ownerFullName
+
+    val currentUserAddress = mainUiState.walletAddress
+    val isLoggedIn = mainUiState.isLoggedIn
+    val token = mainViewModel.userToken
+
+    // State lokal khusus untuk UI
+    var commentText by remember { mutableStateOf("") }
     var showRatingDialog by remember { mutableStateOf(false) }
-    var selectedRating by remember { mutableStateOf(3f) }
-    val isLiked by remember(plant) {
-        derivedStateOf { plant?.isLikedByUser == true }
-    }
-    var isLiking by remember { mutableStateOf(false) }
+    var selectedRatingState by remember { mutableStateOf(3f) }
+    var bitmapState by remember { mutableStateOf<ImageBitmap?>(null) }
 
-    val bitmapState = remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    // Memuat data awal dan merefresh saat ada perubahan di state operasi
+    LaunchedEffect(plantId, plantUiState.likePlantState, plantUiState.ratePlantState, plantUiState.commentPlantState) {
+        // Fungsi helper untuk menangani hasil
+        fun handleResult(result: Any, resetAction: () -> Unit, successMessage: String) {
+            when (result) {
+                is LikePlantResult.Success, is RatePlantResult.Success, is CommentPlantResult.Success -> {
+                    Toast.makeText(context, successMessage, Toast.LENGTH_SHORT).show()
+                    viewModel.refreshPlantDetail(plantId, token) // REFRESH DATA setelah aksi sukses
+                    resetAction()
+                }
+                is LikePlantResult.Error -> { Toast.makeText(context, result.errorMessage, Toast.LENGTH_LONG).show(); resetAction() }
+                is RatePlantResult.Error -> { Toast.makeText(context, result.errorMessage, Toast.LENGTH_LONG).show(); resetAction() }
+                is CommentPlantResult.Error -> { Toast.makeText(context, result.errorMessage, Toast.LENGTH_LONG).show(); resetAction() }
+            }
+        }
 
-    fun formatTimestamp(timestamp: String): String {
-        return try {
-            val millis = timestamp.toLongOrNull()?.times(1000) ?: return timestamp
-            val sdf = SimpleDateFormat("dd MMMM yyyy, HH:mm", Locale("id"))
-            sdf.format(Date(millis))
-        } catch (e: Exception) {
-            timestamp
+        handleResult(plantUiState.likePlantState, viewModel::resetLikePlantState, "Aksi like/unlike berhasil")
+        handleResult(plantUiState.ratePlantState, viewModel::resetRatePlantState, "Rating berhasil dikirim")
+        handleResult(plantUiState.commentPlantState, viewModel::resetCommentPlantState, "Komentar berhasil ditambahkan")
+
+        // Memuat data awal jika belum ada
+        if (plant == null || plant.id != plantId) {
+            viewModel.refreshPlantDetail(plantId, token)
         }
     }
 
-    suspend fun fetchBitmapFromIPFS(cid: String, apiService: ApiService): androidx.compose.ui.graphics.ImageBitmap? {
-        return try {
-            val responseBody = apiService.getFileFromIPFS(cid)
-            val bytes = responseBody.bytes()
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            bitmap?.asImageBitmap()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-    LaunchedEffect(plantId) {
-        viewModel.fetchPlantDetail(plantId, token)
-        viewModel.getPlantComments(plantId)
-        plant?.owner?.let { ownerAddress ->
-            // Mengambil fullName owner berdasarkan wallet address (owner)
-            viewModel.fetchOwnerFullName(ownerAddress)
-        }
-    }
-
-    LaunchedEffect(plant) {
-        plant?.let {
-            likeCount = it.likeCount.toIntOrNull() ?: 0
-            isLoading = false
-        }
-    }
-
+    // Memuat gambar dari IPFS
     LaunchedEffect(plant?.ipfsHash) {
         plant?.ipfsHash?.let { cid ->
-            bitmapState.value = withContext(Dispatchers.IO) {
-                fetchBitmapFromIPFS(cid, viewModel.apiServiceInstance)
+            if (cid.isNotBlank()) {
+                bitmapState = viewModel.fetchImageBitmapFromIpfs(cid)
             }
         }
     }
 
+    // --- UI ---
+
     if (showRatingDialog) {
-        AlertDialog(
-            onDismissRequest = { showRatingDialog = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    showRatingDialog = false
-                    viewModel.ratePlant(token, plantId, selectedRating.toInt(),
-                        onSuccess = {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Rating berhasil dikirim!")
-                                // Panggil refreshPlantDetail untuk mendapatkan data terbaru
-                                viewModel.refreshPlantDetail(plantId, token)
-                            }
-                        },
-                        onError = { errorMessage ->
-                            scope.launch {
-                                val message = when {
-                                    errorMessage.contains("rating", ignoreCase = true) -> {
-                                        "Rating berhasil diperbarui!"
-                                    }
-                                    errorMessage.contains("login", ignoreCase = true) -> {
-                                        "Harap login terlebih dahulu untuk memberikan rating."
-                                    }
-                                    else -> {
-                                        "Terjadi kesalahan, coba lagi nanti."
-                                    }
-                                }
-                                snackbarHostState.showSnackbar(message)
-                            }
-                        }
-                    )
-                }) {
-                    Text("Kirim")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRatingDialog = false }) {
-                    Text("Batal")
-                }
-            },
-            title = { Text("Beri Rating Tanaman") },
-            text = {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Pilih Rating:")
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                    ) {
-                        for (i in 1..5) {
-                            IconButton(onClick = { selectedRating = i.toFloat() }) {
-                                Icon(
-                                    imageVector = if (i <= selectedRating.toInt()) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                                    contentDescription = "Bintang $i",
-                                    tint = if (i <= selectedRating.toInt()) Color(0xFFFFC107) else Color.Gray, // Warna bintang aktif
-                                    modifier = Modifier.size(40.dp)
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Rating: ${selectedRating.toInt()} ⭐")
-                }
+        RatingDialog(
+            selectedRating = selectedRatingState,
+            onRatingChange = { selectedRatingState = it },
+            onDismiss = { showRatingDialog = false },
+            onConfirm = {
+                showRatingDialog = false
+                viewModel.performRatePlant(token, plantId, selectedRatingState.toInt())
             }
         )
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Detail Tanaman", fontSize = 20.sp, color = darkGreen, fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Kembali", tint = darkGreen)
-                    }
-                },
-                actions = {
-                    val animatedTint by animateColorAsState(
-                        targetValue = if (isLiked) Color.Gray else Color.Red,
-                        label = "likeColor"
-                    )
-
-                    IconButton(
-                        onClick = {
-                            if (!isLiking) {
-                                isLiking = true
-                                viewModel.likePlant(
-                                    token = token,
-                                    plantId = plantId,
-                                    onSuccess = {
-                                        scope.launch {
-                                            viewModel.toggleLikeLocally() // Ubah state local dulu biar UI cepat berubah
-                                            snackbarHostState.showSnackbar(
-                                                if (isLiked) "Berhasil batal menyukai tanaman"
-                                                else "Berhasil menyukai tanaman"
-                                            )
-                                            viewModel.refreshPlantDetail(plantId, token) // Baru sync server
-                                            isLiking = false
-                                        }
-                                    },
-                                    onError = {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("Harap login terlebih dahulu sebelum memberikan Like")
-                                            isLiking = false
-                                        }
-                                    }
-                                )
-                            }
-                        },
-                        enabled = !isLiking
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                                contentDescription = if (isLiked) "Batal Like" else "Like",
-                                tint = animatedTint,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            if (isLiking) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(28.dp),
-                                    strokeWidth = 2.dp,
-                                    color = animatedTint
-                                )
-                            }
-                        }
-                    }
-
-                    // Menambahkan tombol Edit jika pemilik tanaman
-                    if (plant?.owner?.lowercase() == userAddress?.lowercase()) {
-                        IconButton(onClick = onEdit) {
-                            Icon(Icons.Filled.Edit, contentDescription = "Edit Tanaman", tint = Color.Blue)
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = colorResource(id = R.color.green),
-                    titleContentColor = darkGreen,
-                    navigationIconContentColor = darkGreen,
-                    actionIconContentColor = Color.Red
-                )
+            DetailTopAppBar(
+                isLiked = plant?.isLikedByUser == true,
+                isLiking = plantUiState.likePlantState is LikePlantResult.Loading,
+                isOwner = plant?.owner?.equals(currentUserAddress, ignoreCase = true) == true,
+                isLoggedIn = mainUiState.isLoggedIn,
+                onBack = onBack,
+                onEdit = onEdit,
+                onLike = { viewModel.performLikePlant(token, plantId) }
             )
         },
         bottomBar = {
             CommentInputSection(
-                comment = comment,
-                onCommentChange = { comment = it },
+                comment = commentText,
+                onCommentChange = { commentText = it },
                 onSendComment = {
-                    if (comment.isNotBlank()) {
-                        viewModel.commentPlant(token, plantId, comment,
-                            onSuccess = {
-                                comment = ""
-                                focusManager.clearFocus()
-                                viewModel.refreshPlantDetail(plantId, token) // refresh semuanya
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Komentar berhasil ditambahkan.")
-                                }
-                            },
-                            onError = {
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Harap login terlebih dahulu sebelum memberikan komentar")
-                                }
-                            }
-                        )
-                    } else {
+                    if (commentText.isNotBlank()) {
+                        viewModel.performCommentPlant(token, plantId, commentText)
+                        commentText = ""
                         focusManager.clearFocus()
                     }
                 },
-                backgroundColor = backgroundColor
+                isEnabled = mainUiState.isLoggedIn
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        }
     ) { innerPadding ->
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(backgroundColor),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = darkGreen)
+        if (plantUiState.isLoading && plant == null) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
-        } else {
+        } else if (plant != null) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(backgroundColor)
+                    .background(colorResource(id = R.color.soft_green))
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
                     .padding(16.dp)
             ) {
-                plant?.let {
-                    Text(it.name, fontSize = 26.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = textColor)
-                    Spacer(modifier = Modifier.height(8.dp))
+                Text(plant.name, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Owner: $ownerFullName (${plant.owner})", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.Gray)
 
-                    Text("Owner: $ownerFullName (${it.owner})", color = textColor, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                DetailItem("Nama Latin", plant.namaLatin)
+                DetailItem("Komposisi", plant.komposisi)
+                DetailItem("Manfaat", plant.manfaat)
+                DetailItem("Dosis", plant.dosis)
+                DetailItem("Cara Pengolahan", plant.caraPengolahan)
+                DetailItem("Efek Samping", plant.efekSamping)
 
-                    DetailItem("Nama Latin", it.namaLatin, textColor)
-                    DetailItem("Komposisi", it.komposisi, textColor)
-                    DetailItem("Kegunaan", it.kegunaan, textColor)
-                    DetailItem("Dosis", it.dosis, textColor)
-                    DetailItem("Cara Pengolahan", it.caraPengolahan, textColor)
-                    DetailItem("Efek Samping", it.efekSamping, textColor)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Rating Rata-rata: ${String.format("%.1f", avgRating)} ⭐", fontWeight = FontWeight.Bold)
 
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Rating Rata-rata: $avgRating", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = textColor)
-
-                    if (plant?.isRatedByUser == false) {
-                        Button(
-                            onClick = { showRatingDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = darkGreen),
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            Text("Beri Rating", color = Color.White)
-                        }
+                if (mainUiState.isLoggedIn) {
+                    if (plant.isRatedByUser) {
+                        Text("Anda sudah memberi rating", color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
                     } else {
-                        Text("Kamu sudah memberi rating", color = Color.Gray, fontSize = 14.sp)
+                        Button(onClick = { showRatingDialog = true }, modifier = Modifier.padding(top = 8.dp)) {
+                            Text("Beri Rating")
+                        }
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                    bitmapState.value?.let { bitmap ->
-                        Image(
-                            bitmap = bitmap,
-                            contentDescription = "Gambar Tanaman",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(220.dp)
-                                .clip(RoundedCornerShape(12.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    } ?: Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(220.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.LightGray),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Memuat gambar...", color = Color.DarkGray)
-                    }
+                bitmapState?.let {
+                    Image(
+                        bitmap = it,
+                        contentDescription = "Gambar Tanaman",
+                        modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } ?: Box(modifier = Modifier.fillMaxWidth().height(220.dp).background(Color.LightGray), contentAlignment = Alignment.Center) {
+                    if(plant.ipfsHash.isNotBlank()) CircularProgressIndicator() else Text("Gambar tidak tersedia")
+                }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Disukai oleh $likeCount pengguna", color = textColor, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Disukai oleh ${plant.likeCount} pengguna", fontSize = 14.sp)
 
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text("Komentar Pengguna:", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 18.sp, color = textColor)
-                    Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(20.dp))
+                Text("Komentar Pengguna:", fontWeight = FontWeight.Bold, fontSize = 18.sp)
 
+                if (comments.isEmpty()) {
+                    Text("Belum ada komentar.", modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray)
+                } else {
                     comments.forEach { c ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = cardColor)
-                        ) {
+                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                             Column(modifier = Modifier.padding(12.dp)) {
-                                Text("${c.fullName} (${c.publicKey})", fontWeight = FontWeight.Bold, color = textColor)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(c.comment, color = textColor)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("Waktu: ${formatTimestamp(c.timestamp)}", fontSize = 12.sp, color = Color.Gray)
+                                Text("${c.fullName} (${c.publicKey})", fontWeight = FontWeight.Bold)
+                                Text(c.comment)
+                                Text(formatTimestamp(c.timestamp), fontSize = 12.sp, color = Color.Gray)
                             }
                         }
                     }
-                } ?: Text("Tanaman tidak ditemukan.", color = textColor)
+                }
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Tanaman tidak ditemukan.")
             }
         }
     }
 }
 
+// --- COMPOSABLE PENDUKUNG ---
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailItem(label: String, value: String, color: Color) {
+private fun DetailTopAppBar(
+    isLiked: Boolean,
+    isLiking: Boolean,
+    isOwner: Boolean,
+    isLoggedIn: Boolean,
+    onBack: () -> Unit,
+    onEdit: () -> Unit,
+    onLike: () -> Unit
+) {
+    TopAppBar(
+        title = { Text("Detail Tanaman", fontWeight = FontWeight.Bold) },
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, "Kembali")
+            }
+        },
+        actions = {
+            val animatedTint by animateColorAsState(
+                targetValue = if (isLiked) Color.Red else Color.Gray,
+                label = "likeColorAnimation"
+            )
+            IconButton(onClick = onLike, enabled = !isLiking && isLoggedIn) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (isLiking) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = "Like",
+                            tint = animatedTint
+                        )
+                    }
+                }
+            }
+            if (isOwner) {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Edit Tanaman")
+                }
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = colorResource(id = R.color.green))
+    )
+}
+
+@Composable
+private fun RatingDialog(
+    selectedRating: Float,
+    onRatingChange: (Float) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Kirim") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } },
+        title = { Text("Beri Rating Tanaman") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Text("Pilih Rating:")
+                Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    for (i in 1..5) {
+                        IconButton(onClick = { onRatingChange(i.toFloat()) }) {
+                            Icon(
+                                imageVector = if (i <= selectedRating.toInt()) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                contentDescription = "Bintang $i",
+                                tint = if (i <= selectedRating.toInt()) Color(0xFFFFC107) else Color.Gray,
+                                modifier = Modifier.size(40.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Rating: ${selectedRating.toInt()} ⭐")
+            }
+        }
+    )
+}
+
+@Composable
+private fun DetailItem(label: String, value: String) {
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Text("$label:", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = color)
-        Text(value, color = color)
+        Text("$label:", fontWeight = FontWeight.Bold)
+        Text(value)
     }
 }
 
 @Composable
-fun CommentInputSection(
+private fun CommentInputSection(
     comment: String,
     onCommentChange: (String) -> Unit,
     onSendComment: () -> Unit,
-    backgroundColor: Color
+    isEnabled: Boolean
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = backgroundColor,
-        tonalElevation = 0.dp
-    ) {
+    Surface(modifier = Modifier.fillMaxWidth(), tonalElevation = 3.dp) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
                 value = comment,
                 onValueChange = onCommentChange,
-                placeholder = { Text("Tambahkan Komentar Anda...", color = Color.Gray) },
+                placeholder = { Text(if (isEnabled) "Tambahkan Komentar..." else "Login untuk berkomentar", color = Color.Gray) },
                 textStyle = TextStyle(color = Color.Black),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { onSendComment() }),
-                modifier = Modifier
-                    .weight(1f)
-                    .background(Color.Transparent)
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSendComment() }),
+                modifier = Modifier.weight(1f),
+                enabled = isEnabled
             )
-            IconButton(onClick = onSendComment) {
+            IconButton(onClick = onSendComment, enabled = isEnabled) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Kirim Komentar",
-                    tint = colorResource(id = R.color.dark_green)
+                    tint = if (isEnabled) colorResource(id = R.color.dark_green) else Color.Gray
                 )
             }
         }
+    }
+}
+
+private fun formatTimestamp(timestamp: String): String {
+    return try {
+        val millis = timestamp.toLongOrNull()?.times(1000) ?: return timestamp
+        val sdf = SimpleDateFormat("dd MMMM yyyy, HH:mm", Locale("id", "ID"))
+        sdf.format(Date(millis))
+    } catch (e: Exception) {
+        timestamp
     }
 }

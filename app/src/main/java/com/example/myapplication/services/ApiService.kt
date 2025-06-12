@@ -1,28 +1,20 @@
 package com.example.myapplication.services
 
 import com.example.myapplication.data.DataClassResponses
-import com.example.myapplication.data.DataClassResponses.AddPlantRequest
-import com.example.myapplication.data.DataClassResponses.AddPlantResponse
 import com.example.myapplication.data.DataClassResponses.AverageRatingResponse
-import com.example.myapplication.data.DataClassResponses.CommentListResponse
-import com.example.myapplication.data.DataClassResponses.CommentRequest
-import com.example.myapplication.data.DataClassResponses.EditPlantRequest
-import com.example.myapplication.data.DataClassResponses.EditPlantResponse
-import com.example.myapplication.data.DataClassResponses.LikeRequest
-import com.example.myapplication.data.DataClassResponses.LoginResponse
-import com.example.myapplication.data.DataClassResponses.LogoutResponse
+import com.example.myapplication.data.DataClassResponses.CheckWalletRequest
+import com.example.myapplication.data.DataClassResponses.CheckWalletResponse
+import com.example.myapplication.data.DataClassResponses.LoginApiResponse
+import com.example.myapplication.data.DataClassResponses.PrepareRegistrationRequest
 import com.example.myapplication.data.DataClassResponses.RatePlantRequest
 import com.example.myapplication.data.DataClassResponses.RatePlantResponse
-import com.example.myapplication.data.DataClassResponses.RegisterResponse
-import com.example.myapplication.data.DataClassResponses.PublicResponse
+import com.example.myapplication.data.DataClassResponses.ServerLogoutResponse
 import com.example.myapplication.data.DataClassResponses.SimpleResponse
 import com.example.myapplication.data.DataClassResponses.UserInfoResponse
 import com.example.myapplication.data.IPFSResponse
 import com.example.myapplication.data.LoginRequest
 import com.example.myapplication.data.PaginatedPlantResponse
 import com.example.myapplication.data.PlantListResponse
-import com.example.myapplication.data.PlantResponse
-import com.example.myapplication.data.User
 import okhttp3.MultipartBody
 import okhttp3.ResponseBody
 import retrofit2.Call
@@ -31,43 +23,62 @@ import retrofit2.http.*
 interface ApiService {
 
     /* ================================ Autentikasi ================================ */
+
     @POST("auth/register")
-    fun registerUser(@Body user: User): Call<RegisterResponse>
+    suspend fun prepareRegistration(
+        @Body request: PrepareRegistrationRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
 
     @POST("auth/login")
-    fun loginUser(@Body loginRequest: LoginRequest): Call<LoginResponse>
+    suspend fun loginUser(
+        @Body loginRequest: LoginRequest
+    ): LoginApiResponse
 
     @GET("auth/user/{walletAddress}")
     suspend fun getUserInfo(@Path("walletAddress") walletAddress: String): UserInfoResponse
 
     @POST("auth/logout")
-    fun logoutUser(@Header("Authorization") authorization: String): Call<LogoutResponse>
+    suspend fun logoutUserFromServer(
+        @Header("Authorization") authorization: String
+    ): ServerLogoutResponse
 
     /* ================================ Tanaman ================================ */
     @POST("plants/add")
-    suspend fun addPlant(
+    suspend fun prepareAddPlant( // Nama diubah untuk kejelasan
         @Header("Authorization") token: String,
-        @Body request: AddPlantRequest
-    ): AddPlantResponse
-
-    @POST("plants/syncPublic")
-    suspend fun syncPlantToPublic(
-        @Header("Authorization") token: String,
-        @Body plantId: String
-    ): PublicResponse
+        @Body request: DataClassResponses.AddPlantRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
 
     @PUT("plants/edit/{plantId}")
-    suspend fun editPlant(
+    suspend fun prepareEditPlant( // Nama diubah untuk kejelasan
         @Header("Authorization") token: String,
         @Path("plantId") plantId: String,
-        @Body request: EditPlantRequest
-    ): EditPlantResponse
+        @Body request: DataClassResponses.EditPlantRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
 
-        @GET("plants/all")
-        suspend fun getPaginatedPlants(
-            @Query("page") page: Int,
-            @Query("limit") limit: Int = 10
-        ): PaginatedPlantResponse
+    @POST("plants/like")
+    suspend fun prepareLikePlant( // Nama diubah untuk kejelasan
+        @Header("Authorization") token: String,
+        @Body request: DataClassResponses.LikeRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
+
+    @POST("plants/rate")
+    suspend fun prepareRatePlant( // Nama diubah untuk kejelasan
+        @Header("Authorization") token: String,
+        @Body request: DataClassResponses.RatePlantRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
+
+    @POST("plants/comment")
+    suspend fun prepareCommentPlant( // Nama diubah untuk kejelasan
+        @Header("Authorization") token: String,
+        @Body request: DataClassResponses.CommentRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
+
+    @GET("plants/all")
+    suspend fun getPaginatedPlants(
+        @Query("page") page: Int,
+        @Query("limit") limit: Int = 10
+    ): PaginatedPlantResponse
 
     @GET("plants/{plantId}")
     suspend fun getPlantById(
@@ -80,7 +91,7 @@ interface ApiService {
         @Query("name") name: String = "",
         @Query("namaLatin") namaLatin: String = "",
         @Query("komposisi") komposisi: String = "",
-        @Query("kegunaan") kegunaan: String = ""
+        @Query("manfaat") manfaat: String = ""
     ): PlantListResponse
 
     @GET("plants/plant/averageRating/{plantId}")
@@ -88,36 +99,20 @@ interface ApiService {
         @Path("plantId") plantId: String
     ): AverageRatingResponse
 
-    @POST("plants/like")
-    suspend fun likePlant(
-        @Header("Authorization") token: String,
-        @Body request: LikeRequest
-    ): SimpleResponse
-
-    @POST("plants/comment")
-    suspend fun commentPlant(
-        @Header("Authorization") token: String,
-        @Body request: CommentRequest
-    ): SimpleResponse
-
     @GET("plants/{plantId}/comments")
-    suspend fun getComments(
-        @Path("plantId") plantId: String
-    ): CommentListResponse
-
-    @POST("plants/rate")
-    suspend fun ratePlant(
-        @Header("Authorization") token: String,
-        @Body request: RatePlantRequest
-    ): RatePlantResponse
+    suspend fun getPaginatedComments( // Nama diubah untuk kejelasan
+        @Path("plantId") plantId: String,
+        @Query("page") page: Int,
+        @Query("limit") limit: Int = 10
+    ): DataClassResponses.PaginatedCommentResponse
 
     /* ================================ IPFS ================================ */
     @Multipart
     @POST("ipfs/upload")
-    fun uploadImage(
+    suspend fun uploadImage(
         @Header("Authorization") token: String,
         @Part file: MultipartBody.Part
-    ): Call<IPFSResponse>
+    ): IPFSResponse
 
     @GET("ipfs/getFile/{cid}")
     suspend fun getFileFromIPFS(

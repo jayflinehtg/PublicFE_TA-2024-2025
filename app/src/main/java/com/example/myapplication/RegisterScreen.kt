@@ -5,7 +5,11 @@ import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,43 +17,92 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
-import com.example.myapplication.data.User
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.example.myapplication.data.DataClassResponses
-import com.example.myapplication.data.DataClassResponses.RegisterResponse
 import com.example.myapplication.data.PreferencesHelper
-import com.example.myapplication.services.RetrofitClient
-import org.json.JSONObject
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import com.example.myapplication.data.RegistrationResult
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterScreen(
     navController: NavController,
-    onRegisterSuccess: (String) -> Unit,
+    viewModel: MainViewModel,
     onNavigateToLogin: () -> Unit
 ) {
     val context = LocalContext.current
-    val walletAddress = PreferencesHelper.getWalletAddress(context) // Ini bisa String?
 
     var fullName by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var fullNameError by remember { mutableStateOf<String?>(null) }
-    var passwordError by remember { mutableStateOf<String?>(null) }
-    var generalError by remember { mutableStateOf<String?>(null) } // Sudah benar
 
-    LaunchedEffect(walletAddress) {
-        if (walletAddress.isNullOrEmpty()) {
-            navController.navigate("walletComponent") {
-                popUpTo("register") { inclusive = true }
+    var fullNameErrorLocal by remember { mutableStateOf<String?>(null) }
+    var passwordErrorLocal by remember { mutableStateOf<String?>(null) }
+
+    val uiState by viewModel.uiState.collectAsState()
+    val registrationState = uiState.registrationState
+    val isFormEnabled = registrationState !is RegistrationResult.Loading && !uiState.isConnecting
+
+
+    LaunchedEffect(uiState.walletAddress) {
+        val walletAddress = uiState.walletAddress
+        if (!walletAddress.isNullOrEmpty()) {
+            viewModel.fetchUserDataFromPrefs {
+                Toast.makeText(context, "Wallet Anda belum terdaftar, silakan registrasi.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    LaunchedEffect(uiState.walletAddress, uiState.isGuest) {
+        if (uiState.walletAddress.isNullOrEmpty() && !uiState.isGuest) {
+            Toast.makeText(context, "Wallet tidak terhubung. Silakan hubungkan wallet Anda.", Toast.LENGTH_LONG).show()
+            navController.navigate(Screen.WalletComponent.route) {
+                popUpTo(Screen.Register.route) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
+    // Handle hasil operasi registrasi dari ViewModel
+    LaunchedEffect(registrationState) {
+        when (registrationState) {
+            is RegistrationResult.Success -> {
+                Toast.makeText(context, "Registrasi berhasil!", Toast.LENGTH_SHORT).show()
+                viewModel.resetRegistrationState()
+            }
+            is RegistrationResult.AlreadyRegistered -> {
+                Toast.makeText(context, registrationState.message, Toast.LENGTH_LONG).show()
+                onNavigateToLogin()
+                viewModel.resetRegistrationState()
+            }
+            is RegistrationResult.Error -> {
+                val errorMessage = registrationState.errorMessage
+                val toastMessage = when {
+                    errorMessage.contains("sudah terdaftar", ignoreCase = true) ->
+                        "Akun dengan alamat wallet ini sudah terdaftar. Silakan login."
+                    // Handle user cancellation
+                    errorMessage.contains("User membatalkan", ignoreCase = true) ||
+                            errorMessage.contains("Registrasi dibatalkan", ignoreCase = true) ->
+                        "Registrasi dibatalkan."
+                    else -> errorMessage
+                }
+                Toast.makeText(context, toastMessage, Toast.LENGTH_LONG).show()
+
+                if (errorMessage.contains("sudah terdaftar", ignoreCase = true)) {
+                    onNavigateToLogin()
+                }
+                viewModel.resetRegistrationState()
+            }
+            is RegistrationResult.Loading -> {
+                Log.d("RegisterScreen", "RegistrationState adalah Loading.")
+            }
+            is RegistrationResult.Idle -> {
+                Log.d("RegisterScreen", "RegistrationState adalah Idle.")
             }
         }
     }
@@ -66,48 +119,40 @@ fun RegisterScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 40.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Image(
                 painter = painterResource(id = R.drawable.plant),
                 contentDescription = "Logo Tanaman",
-                modifier = Modifier
-                    .size(130.dp)
-                    .padding(bottom = 8.dp)
+                modifier = Modifier.size(130.dp).padding(bottom = 8.dp)
             )
-
             Text(
                 text = "REGISTER",
                 fontSize = 30.sp,
                 fontWeight = FontWeight.Bold,
-                color = colorResource(id = R.color.dark_green),
+                color = colorResource(id = R.color.dark_green)
             )
-
             Text(
                 text = "Daftar Akun Anda!",
                 fontSize = 14.sp,
                 color = colorResource(id = R.color.black)
             )
-
             Spacer(modifier = Modifier.height(16.dp))
 
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = colorResource(id = R.color.green)),
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth(0.85f)
+                modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(0.90f)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Input Nama Lengkap
                     OutlinedTextField(
                         value = fullName,
                         onValueChange = {
                             fullName = it
-                            if (fullNameError != null) fullNameError = null
-                            if (generalError != null) generalError = null // <-- Tambahkan ini
+                            fullNameErrorLocal = null
                         },
                         label = { Text("Nama Lengkap", style = TextStyle(color = Color.Black)) },
                         placeholder = { Text("Masukkan Nama Lengkap", style = TextStyle(color = Color.Gray)) },
@@ -115,33 +160,28 @@ fun RegisterScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp),
-                        isError = fullNameError != null || generalError != null, // <-- Perbaiki ini
+                        isError = fullNameErrorLocal != null,
                         colors = TextFieldDefaults.colors(
                             unfocusedContainerColor = Color.White,
                             focusedContainerColor = Color.White,
-                            disabledContainerColor = Color.White,
+                            disabledContainerColor = Color.LightGray,
                             errorContainerColor = Color.White,
-                            errorTextColor = Color.Red,
-                        )
+                            unfocusedIndicatorColor = Color.Gray,
+                            focusedIndicatorColor = colorResource(id = R.color.dark_green)
+                        ),
+                        enabled = isFormEnabled
                     )
-                    if (fullNameError != null) {
-                        Text(
-                            fullNameError!!,
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.Start)
-                        )
+                    if (fullNameErrorLocal != null) {
+                        Text(fullNameErrorLocal!!, color = Color.Red, fontSize = 12.sp, modifier = Modifier.align(Alignment.Start).padding(start = 4.dp))
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Input Kata Sandi
                     OutlinedTextField(
                         value = password,
                         onValueChange = {
                             password = it
-                            if (passwordError != null) passwordError = null
-                            if (generalError != null) generalError = null // <-- Tambahkan ini
+                            passwordErrorLocal = null
                         },
                         label = { Text("Kata Sandi", style = TextStyle(color = Color.Black)) },
                         placeholder = { Text("Masukkan Kata Sandi", style = TextStyle(color = Color.Gray)) },
@@ -150,139 +190,105 @@ fun RegisterScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp),
-                        isError = passwordError != null || generalError != null, // <-- Perbaiki ini
+                        isError = passwordErrorLocal != null,
                         colors = TextFieldDefaults.colors(
                             unfocusedContainerColor = Color.White,
                             focusedContainerColor = Color.White,
-                            disabledContainerColor = Color.White,
+                            disabledContainerColor = Color.LightGray,
                             errorContainerColor = Color.White,
-                            errorTextColor = Color.Red,
-                        )
-                    )
-                    if (passwordError != null) {
-                        Text(
-                            passwordError!!,
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.Start)
-                        )
-                    }
-                    // <-- Tambahkan ini untuk menampilkan generalError
-                    if (generalError != null) {
-                        Text(
-                            text = generalError!!,
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.Start)
-                        )
-                    }
+                            unfocusedIndicatorColor = Color.Gray,
+                            focusedIndicatorColor = colorResource(id = R.color.dark_green)
+                        ),
+                        keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                            fullNameErrorLocal = null
+                            passwordErrorLocal = null
+                            viewModel.resetRegistrationState()
 
-                    // Tombol Daftar
-                    Button(
-                        onClick = {
-                            fullNameError = null
-                            passwordError = null
-                            generalError = null // <-- Tambahkan ini
-
+                            var hasValidationError = false
                             if (fullName.isBlank()) {
-                                fullNameError = "Nama lengkap tidak boleh kosong."
-                                return@Button
+                                fullNameErrorLocal = "Nama lengkap tidak boleh kosong."
+                                hasValidationError = true
                             }
 
                             if (password.isBlank()) {
-                                passwordError = "Kata sandi tidak boleh kosong."
-                                return@Button
+                                passwordErrorLocal = "Kata sandi tidak boleh kosong."
+                                hasValidationError = true
                             }
-                            if (password.length < 6) {
-                                passwordError = "Kata sandi minimal 6 karakter."
-                                return@Button
+                            else if (password.length < 6) {
+                                passwordErrorLocal = "Kata sandi minimal 6 karakter."
+                                hasValidationError = true
                             }
-                            val passwordRegex = Regex("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).+\$")
-                            if (!password.matches(passwordRegex)) {
-                                passwordError = "Kata sandi harus mengandung minimal satu huruf besar, satu huruf kecil, dan satu angka."
-                                return@Button
-                            }
-
-                            // Gunakan variabel yang sudah ada
-                            val currentWalletAddress = walletAddress // Ambil dari `walletAddress` di atas
-                            if (currentWalletAddress.isNullOrEmpty()) {
-                                Toast.makeText(context, "Wallet address tidak ditemukan. Silakan hubungkan wallet Anda terlebih dahulu.", Toast.LENGTH_LONG).show()
-                                navController.navigate("walletComponent") {
-                                    popUpTo("register") { inclusive = true }
+                            else {
+                                val passwordRegex = Regex("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).+\$")
+                                if (!password.matches(passwordRegex)) {
+                                    passwordErrorLocal = "Kata sandi harus mengandung huruf besar, kecil, dan angka."
+                                    hasValidationError = true
                                 }
+                            }
+
+                            if (hasValidationError) {
+                            } else {
+                                Log.d("RegisterScreen_Keyboard", "Memanggil viewModel.performRegistration dari keyboard action 'Done'")
+                                viewModel.performRegistration(fullName, password)
+                            }
+                        }),
+                        enabled = isFormEnabled
+                    )
+                    if (passwordErrorLocal != null) {
+                        Text(passwordErrorLocal!!, color = Color.Red, fontSize = 12.sp, modifier = Modifier.align(Alignment.Start).padding(start = 4.dp))
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = {
+                            fullNameErrorLocal = null
+                            passwordErrorLocal = null
+                            viewModel.resetRegistrationState()
+
+                            var hasValidationError = false
+                            if (fullName.isBlank()) {
+                                fullNameErrorLocal = "Nama lengkap tidak boleh kosong."
+                                hasValidationError = true
+                            }
+                            if (password.isBlank()) {
+                                passwordErrorLocal = "Kata sandi tidak boleh kosong."
+                                hasValidationError = true
+                            } else if (password.length < 6) {
+                                passwordErrorLocal = "Kata sandi minimal 6 karakter."
+                                hasValidationError = true
+                            } else {
+                                val passwordRegex = Regex("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).+\$")
+                                if (!password.matches(passwordRegex)) {
+                                    passwordErrorLocal = "Kata sandi harus mengandung huruf besar, kecil, dan angka."
+                                    hasValidationError = true
+                                }
+                            }
+
+                            if (hasValidationError) {
                                 return@Button
                             }
 
-                            Log.d("Password", "Password yang dikirim: $password")
-
-                            // Buat objek user dengan walletAddress yang diterima
-                            val user = User(fullName, currentWalletAddress, password) // <-- Perbaiki ini
-
-                            Log.d("WalletAddress", "Wallet Address: $currentWalletAddress")
-
-                            // Panggil API untuk register
-                            RetrofitClient.apiService.registerUser(user).enqueue(object : Callback<RegisterResponse> {
-                                override fun onResponse(call: Call<RegisterResponse>, response: Response<DataClassResponses.RegisterResponse>) {
-                                    if (response.isSuccessful) {
-                                        Log.d("API", "Register Success: ${response.body()?.txHash}")
-                                        Toast.makeText(context, "Registrasi berhasil!", Toast.LENGTH_SHORT).show()
-                                        onRegisterSuccess(currentWalletAddress) // <-- Perbaiki ini
-                                        navController.navigate("login") {
-                                            popUpTo("register") { inclusive = true }
-                                        }
-                                    } else {
-                                        val errorBodyString = response.errorBody()?.string()
-                                        Log.e("API", "Register Failed: ${response.code()} - $errorBodyString")
-
-                                        var displayErrorMessage = "Registrasi gagal, silakan coba lagi."
-                                        try {
-                                            val errorJson = JSONObject(errorBodyString)
-                                            val backendMessage = errorJson.optString("message", "unknown_error")
-
-                                            // Deteksi pesan error dari smart contract yang dibungkus middleware
-                                            if (backendMessage.contains("Pendaftaran gagal: Akun sudah terdaftar", ignoreCase = true)) {
-                                                displayErrorMessage = "Wallet Anda sudah terdaftar. Silakan login."
-                                                generalError = displayErrorMessage
-                                            } else if (backendMessage.contains("Pendaftaran gagal: Password tidak boleh kosong", ignoreCase = true)) {
-                                                passwordError = "Kata sandi tidak boleh kosong." // Kata sandi, bukan sandiri
-                                                displayErrorMessage = passwordError!!
-                                            }
-                                            else {
-                                                displayErrorMessage = backendMessage
-                                                generalError = displayErrorMessage
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.e("API", "Error parsing error body: ${e.message}")
-                                            generalError = displayErrorMessage
-                                        }
-                                        Toast.makeText(context, displayErrorMessage, Toast.LENGTH_LONG).show()
-                                    }
-                                }
-
-                                override fun onFailure(call: Call<RegisterResponse>, t: Throwable) {
-                                    Log.e("API", "Error: ${t.message}", t)
-                                    generalError = "Tidak dapat terhubung ke server."
-                                    Toast.makeText(context, "Koneksi gagal: ${t.message}", Toast.LENGTH_LONG).show()
-                                }
-                            })
+                            Log.d("RegisterScreen", "Memanggil viewModel.performRegistration")
+                            viewModel.performRegistration(fullName, password)
                         },
+                        enabled = isFormEnabled,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B5E20)),
                         shape = RoundedCornerShape(50),
-                        modifier = Modifier.fillMaxWidth(0.8f)
+                        modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
                     ) {
-                        Text("Daftar", fontSize = 14.sp, color = Color.White)
+                        if (registrationState is RegistrationResult.Loading || uiState.isConnecting) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text("Daftar", fontSize = 16.sp, color = Color.White)
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Link Login
-                    TextButton(onClick = {
-                        navController.navigate("login") {
-                            popUpTo("register") { inclusive = true } // Umumnya popUpTo ini inklusif jika Anda mau user langsung ke login
-                        }
-                    }) {
+                    TextButton(onClick = onNavigateToLogin, enabled = isFormEnabled) {
                         Text(
                             "Sudah memiliki akun? Masuk disini!",
                             fontSize = 12.sp,
@@ -291,6 +297,7 @@ fun RegisterScreen(
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }

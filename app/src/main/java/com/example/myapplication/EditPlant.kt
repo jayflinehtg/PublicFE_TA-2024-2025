@@ -1,4 +1,4 @@
-package com.example.myapplication.ui.screen
+package com.example.myapplication
 
 import android.net.Uri
 import android.widget.Toast
@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -29,78 +28,96 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
-import com.example.myapplication.PlantViewModel
-import com.example.myapplication.R
-import com.example.myapplication.data.DataClassResponses
-import com.example.myapplication.data.IPFSResponse
 import com.example.myapplication.data.PreferencesHelper
-import com.example.myapplication.services.RetrofitClient
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.compose.material.icons.filled.ArrowBack
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import java.io.File
-import java.io.FileOutputStream
+import com.example.myapplication.data.DataClassResponses.EditPlantRequest
+import com.example.myapplication.data.EditPlantResult
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditPlantScreen(
     navController: NavController,
     plantId: String,
-    viewModel: PlantViewModel = hiltViewModel()
+    viewModel: PlantViewModel = hiltViewModel(),
+    mainViewModel: MainViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val plant = viewModel.selectedPlant.value
+    val scope = rememberCoroutineScope()
+
+    // Observasi state dari ViewModel
+    val plantUiState by viewModel.uiState
+    val plantToEdit = plantUiState.selectedPlant
+    val editPlantState = plantUiState.editPlantState
+    val isFormEnabled = !plantUiState.isLoading
 
     // State untuk form
-    var namaTanaman by remember { mutableStateOf(plant?.name ?: "") }
-    var namaLatin by remember { mutableStateOf(plant?.namaLatin ?: "") }
-    var komposisi by remember { mutableStateOf(plant?.komposisi ?: "") }
-    var kegunaan by remember { mutableStateOf(plant?.kegunaan ?: "") }
-    var dosis by remember { mutableStateOf(plant?.dosis ?: "") }
-    var caraPengolahan by remember { mutableStateOf(plant?.caraPengolahan ?: "") }
-    var efekSamping by remember { mutableStateOf(plant?.efekSamping ?: "") }
-    var ipfsHash by remember { mutableStateOf(plant?.ipfsHash ?: "") }
+    var namaTanaman by remember { mutableStateOf("") }
+    var namaLatin by remember { mutableStateOf("") }
+    var komposisi by remember { mutableStateOf("") }
+    var manfaat by remember { mutableStateOf("") }
+    var dosis by remember { mutableStateOf("") }
+    var caraPengolahan by remember { mutableStateOf("") }
+    var efekSamping by remember { mutableStateOf("") }
 
-    // States untuk error per field
-    var namaTanamanError by remember { mutableStateOf<String?>(null) }
-    var namaLatinError by remember { mutableStateOf<String?>(null) }
-    var komposisiError by remember { mutableStateOf<String?>(null) }
-    var kegunaanError by remember { mutableStateOf<String?>(null) }
-    var dosisError by remember { mutableStateOf<String?>(null) }
-    var caraPengolahanError by remember { mutableStateOf<String?>(null) }
-    var efekSampingError by remember { mutableStateOf<String?>(null) }
+    var ipfsHash by remember { mutableStateOf("") }
 
-    // Gambar
-    var gambarUri by remember { mutableStateOf<Uri?>(null) }
+    // State lokal untuk gambar baru
+    var newImageUri by remember { mutableStateOf<Uri?>(null) }
     var isUploading by remember { mutableStateOf(false) }
 
-    // Untuk memilih gambar baru
-    val pickImageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri -> gambarUri = uri }
+    // State lokal untuk validasi UI
+    var namaTanamanError by remember { mutableStateOf<String?>(null) }
+    var namaLatinError by remember { mutableStateOf<String?>(null) }
+    var komposisiError by remember { mutableStateOf<String?>(null)}
+    var manfaatError by remember { mutableStateOf<String?>(null)}
+    var dosisError by remember { mutableStateOf<String?>(null)}
+    var caraPengolahanError by remember { mutableStateOf<String?>(null)}
+    var efekSampingError by remember { mutableStateOf<String?>(null)}
+    var ipfsHashError by remember { mutableStateOf<String?>(null)}
 
-    // LaunchedEffect untuk memuat data plant dari ViewModel
+    val pickImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = { uri -> newImageUri = uri }
+    )
+
+    // Efek untuk memuat data awal saat layar dibuka
     LaunchedEffect(plantId) {
-        val jwtToken = PreferencesHelper.getJwtToken(context)
-        viewModel.fetchPlantDetail(plantId, jwtToken)
+        if (plantToEdit?.id != plantId) {
+            val token = mainViewModel.userToken
+            viewModel.fetchPlantDetail(plantId, token)
+        }
     }
 
-    // Jika plant berubah, update field
-    LaunchedEffect(plant) {
-        plant?.let {
+    // Efek untuk mengisi form ketika data dari ViewModel berubah
+    LaunchedEffect(plantToEdit) {
+        plantToEdit?.let {
             namaTanaman = it.name
             namaLatin = it.namaLatin
             komposisi = it.komposisi
-            kegunaan = it.kegunaan
+            manfaat = it.manfaat
             dosis = it.dosis
             caraPengolahan = it.caraPengolahan
             efekSamping = it.efekSamping
             ipfsHash = it.ipfsHash
+        }
+    }
+
+    // Efek untuk menangani hasil operasi edit dari ViewModel
+    LaunchedEffect(editPlantState) {
+        when (editPlantState) {
+            is EditPlantResult.Success -> {
+                Toast.makeText(context, editPlantState.message, Toast.LENGTH_LONG).show()
+                viewModel.resetEditPlantState()
+                navController.popBackStack() // Kembali ke layar detail setelah sukses edit
+            }
+            is EditPlantResult.Error -> {
+                Toast.makeText(context, editPlantState.errorMessage, Toast.LENGTH_LONG).show()
+                viewModel.resetEditPlantState()
+            }
+            else -> {
+
+            }
         }
     }
 
@@ -155,173 +172,83 @@ fun EditPlantScreen(
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     // Form Fields
-                    FormField(
-                        label = "Nama Tanaman",
-                        value = namaTanaman,
-                        errorText = namaTanamanError,
-                        onChange = {
-                            namaTanaman = it
-                            namaTanamanError = null
-                        }
-                    )
-                    FormField(
-                        label = "Nama Latin",
-                        value = namaLatin,
-                        errorText = namaLatinError,
-                        onChange = {
-                            namaLatin = it
-                            namaLatinError = null
-                        }
-                    )
-                    FormField(
-                        label = "Komposisi",
-                        value = komposisi,
-                        errorText = komposisiError,
-                        onChange = {
-                            komposisi = it
-                            komposisiError = null
-                        }
-                    )
-                    FormField(
-                        label = "Kegunaan",
-                        value = kegunaan,
-                        errorText = kegunaanError,
-                        onChange = {
-                            kegunaan = it
-                            kegunaanError = null
-                        }
-                    )
-                    FormField(
-                        label = "Dosis",
-                        value = dosis,
-                        errorText = dosisError,
-                        onChange = {
-                            dosis = it
-                            dosisError = null
-                        }
-                    )
-                    FormField(
-                        label = "Cara Pengolahan",
-                        value = caraPengolahan,
-                        errorText = caraPengolahanError,
-                        onChange = {
-                            caraPengolahan = it
-                            caraPengolahanError = null
-                        }
-                    )
-                    FormField(
-                        label = "Efek Samping",
-                        value = efekSamping,
-                        errorText = efekSampingError,
-                        onChange = {
-                            efekSamping = it
-                            efekSampingError = null
-                        }
-                    )
+                    FormField(label = "Nama Tanaman", value = namaTanaman, errorText = namaTanamanError) { namaTanaman = it; namaTanamanError = null }
+                    FormField(label = "Nama Latin", value = namaLatin, errorText = namaLatinError) { namaLatin = it; namaLatinError = null }
+                    FormField(label = "Komposisi", value = komposisi, errorText = komposisiError) { komposisi = it; komposisiError = null }
+                    FormField(label = "Manfaat", value = manfaat, errorText = manfaatError) { manfaat = it; manfaatError = null }
+                    FormField(label = "Dosis", value = dosis, errorText = dosisError) { dosis = it; dosisError = null }
+                    FormField(label = "Cara Pengolahan", value = caraPengolahan, errorText = caraPengolahanError) { caraPengolahan = it; caraPengolahanError = null }
+                    FormField(label = "Efek Samping", value = efekSamping, errorText = efekSampingError) { efekSamping = it; efekSampingError = null }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Gambar Tanaman", color = Color.Black)
+                    Text("Gambar Tanaman (Opsional: Ganti Gambar)", color = Color.Black)
                     Button(
                         onClick = { pickImageLauncher.launch("image/*") },
+                        enabled = isFormEnabled,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF81C784)),
                         modifier = Modifier.fillMaxWidth()
-
                     ) {
                         Text("Pilih Gambar Baru", color = Color.White)
                     }
 
-                    // Preview gambar baru jika ada, jika tidak tampilkan gambar lama
-                    if (gambarUri != null) {
+                    // Tampilkan preview gambar baru jika dipilih
+                    newImageUri?.let { uri ->
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("Preview Gambar Baru:", color = Color.Black)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Preview Gambar Baru:", fontWeight = FontWeight.Medium, color = Color.Black)
                         Image(
-                            painter = rememberAsyncImagePainter(gambarUri),
-                            contentDescription = "Preview Gambar Tanaman",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .padding(4.dp)
+                            painter = rememberAsyncImagePainter(uri),
+                            contentDescription = "Preview Gambar Baru",
+                            modifier = Modifier.fillMaxWidth().height(200.dp).padding(4.dp)
                         )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            if (gambarUri == null) {
-                                Toast.makeText(context, "Pilih gambar baru terlebih dahulu", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            isUploading = true
-                            val jwtTokenRaw = PreferencesHelper.getJwtToken(context)
-                            val jwtToken = "Bearer ${jwtTokenRaw ?: ""}"
 
-                            val tempFile = gambarUri?.let { uri ->
-                                try {
-                                    val contentResolver = context.contentResolver
-                                    val inputStream = contentResolver.openInputStream(uri)
-                                    val fileName = "uploaded_image_${System.currentTimeMillis()}.jpg"
-                                    val tempFile = File(context.cacheDir, fileName)
-                                    inputStream?.use { input ->
-                                        FileOutputStream(tempFile).use { output ->
-                                            input.copyTo(output)
-                                        }
+                    // --- TOMBOL KONFIRMASI GAMBAR BARU ---
+                    newImageUri?.let { uri ->
+                    Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    isUploading = true
+                                    val jwtToken = PreferencesHelper.getJwtToken(context)?.let { "Bearer $it" } ?: ""
+                                    if (jwtToken.isBlank()) {
+                                        Toast.makeText(context, "Sesi tidak valid.", Toast.LENGTH_SHORT).show()
+                                        isUploading = false
+                                        return@launch
                                     }
-                                    tempFile
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                    null
+
+                                    try {
+                                        val newCid = viewModel.performUploadImage(jwtToken, uri)
+                                        ipfsHash = newCid // Update state ipfsHash dengan CID baru
+                                        newImageUri = null // Kosongkan URI gambar baru setelah berhasil di-upload
+                                        Toast.makeText(context, "Gambar baru berhasil dikonfirmasi!", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, e.message ?: "Gagal mengunggah gambar.", Toast.LENGTH_LONG).show()
+                                    } finally {
+                                        isUploading = false
+                                    }
                                 }
+                            },
+                            enabled = !isUploading,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            if (isUploading) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                            } else {
+                                Text("Konfirmasi Gambar Baru", color = Color.White)
                             }
-
-                            tempFile?.let { file ->
-                                val requestBody = file.asRequestBody("image/*".toMediaTypeOrNull())
-                                val filePart = MultipartBody.Part.createFormData("file", file.name, requestBody)
-                                RetrofitClient.apiService.uploadImage(jwtToken, filePart).enqueue(object : Callback<IPFSResponse> {
-                                    override fun onResponse(call: Call<IPFSResponse>, response: Response<IPFSResponse>) {
-                                        isUploading = false
-                                        if (response.isSuccessful) {
-                                            response.body()?.let { ipfsResponse ->
-                                                ipfsHash = ipfsResponse.cid
-                                                Toast.makeText(context, "Gambar berhasil diupload!", Toast.LENGTH_SHORT).show()
-                                            }
-                                        } else {
-                                            Toast.makeText(context, "Gagal mengunggah gambar ke IPFS", Toast.LENGTH_SHORT).show()
-                                        }
-                                        file.delete()
-                                    }
-                                    override fun onFailure(call: Call<IPFSResponse>, t: Throwable) {
-                                        isUploading = false
-                                        Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                                })
-                            } ?: run {
-                                Toast.makeText(context, "Gagal membuat file dari URI", Toast.LENGTH_SHORT).show()
-                                isUploading = false
-                            }
-                        },
-                        enabled = !isUploading,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(50)
-                    ) {
-                        Text(if (isUploading) "Mengupload..." else "Konfirmasi Gambar Baru", color = Color.White)
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))
+
+                    // --- TOMBOL SIMPAN PERUBAHAN ---
                     Button(
                         onClick = {
-                            // Reset semua error state sebelum validasi baru
-                            namaTanamanError = null
-                            namaLatinError = null
-                            komposisiError = null
-                            kegunaanError = null
-                            dosisError = null
-                            caraPengolahanError = null
-                            efekSampingError = null
-
                             var hasError = false
 
                             if (namaTanaman.isBlank()) {
@@ -336,8 +263,8 @@ fun EditPlantScreen(
                                 komposisiError = "Komposisi tidak boleh kosong."
                                 hasError = true
                             }
-                            if (kegunaan.isBlank()) {
-                                kegunaanError = "Kegunaan tidak boleh kosong."
+                            if (manfaat.isBlank()) {
+                                manfaatError = "Manfaat tidak boleh kosong."
                                 hasError = true
                             }
                             if (dosis.isBlank()) {
@@ -353,9 +280,10 @@ fun EditPlantScreen(
                                 hasError = true
                             }
 
-                            if (ipfsHash.isBlank()) { // Cek apakah ipfsHash sudah ada
-                                Toast.makeText(context, "Gambar tanaman tidak boleh kosong. Harap unggah gambar terlebih dahulu.", Toast.LENGTH_LONG).show()
+                            if (ipfsHash.isBlank() && newImageUri == null) {
+                                ipfsHashError = "Gambar harus ada (jika baru, konfirmasi terlebih dulu)."
                                 hasError = true
+                                Toast.makeText(context, "Gambar tanaman tidak boleh kosong.", Toast.LENGTH_LONG).show()
                             }
 
                             if (hasError) {
@@ -367,36 +295,33 @@ fun EditPlantScreen(
                             val jwtToken = jwtTokenRaw?.let {
                                 if (it.startsWith("Bearer ")) it else "Bearer $it"
                             } ?: ""
-                            val request = DataClassResponses.EditPlantRequest(
-                                plantId = plantId,
-                                name = namaTanaman,
-                                namaLatin = namaLatin,
-                                komposisi = komposisi,
-                                kegunaan = kegunaan,
-                                dosis = dosis,
-                                caraPengolahan = caraPengolahan,
-                                efekSamping = efekSamping,
-                                ipfsHash = ipfsHash
-                            )
-                            viewModel.editPlant(
-                                token = jwtToken,
-                                request = request,
-                                onSuccess = {
-                                    Toast.makeText(context, "Tanaman berhasil diperbarui!", Toast.LENGTH_SHORT).show()
-                                    navController.popBackStack()
-                                },
-                                onError = { errorMsg ->
-                                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-                                }
-                            )
+                            scope.launch {
+                                val request = EditPlantRequest(
+                                    plantId = plantId,
+                                    name = namaTanaman,
+                                    namaLatin = namaLatin,
+                                    komposisi = komposisi,
+                                    manfaat = manfaat,
+                                    dosis = dosis,
+                                    caraPengolahan = caraPengolahan,
+                                    efekSamping = efekSamping,
+                                    ipfsHash = ipfsHash // Gunakan ipfsHash yang sudah di-update
+                                )
+                                viewModel.performEditPlant(jwtToken, request)
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(50)
+
                     ) {
-                        Text("Simpan Perubahan", color = Color.White)
+                        if (editPlantState is EditPlantResult.Loading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                        } else {
+                            Text("Simpan Perubahan", color = Color.White)
+                        }
                     }
                 }
             }
@@ -408,22 +333,22 @@ fun EditPlantScreen(
 fun FormField(
     label: String,
     value: String,
-    errorText: String?, // Sekarang ini adalah String?
+    errorText: String?,
     onChange: (String) -> Unit
 ) {
     val maxChar = when (label) {
         "Cara Pengolahan" -> 1000
-        "Kegunaan" -> 1000 // Menggunakan Kegunaan sebagai label, bukan Manfaat
+        "Manfaat" -> 1000
         "Efek Samping" -> 1000
         "Komposisi" -> 750
         else -> 255
     }
 
     val isExceedLimit = value.length > maxChar
-    val displayErrorText = when { // Tentukan errorText yang akan ditampilkan
-        errorText != null -> errorText // Error dari validasi di luar FormField (misalnya, di EditPlantScreen)
+    val displayErrorText = when {
+        errorText != null -> errorText
         isExceedLimit -> "$label tidak boleh lebih dari $maxChar karakter"
-        else -> null // Tidak ada error yang perlu ditampilkan
+        else -> null
     }
 
     Column(modifier = Modifier.padding(vertical = 8.dp)) {

@@ -12,47 +12,47 @@ data class PlantListResponse(
 
 data class PlantResponse(
     @SerializedName("plantId")
-    val id: String = "",  // Pastikan ID di sini adalah string, sesuai dengan pengembalian data
+    val id: String = "",
 
     @SerializedName("name")
-    val name: String,  // Nama tanaman
+    val name: String,
 
     @SerializedName("namaLatin")
-    val namaLatin: String,  // Nama latin tanaman
+    val namaLatin: String,
 
     @SerializedName("komposisi")
-    val komposisi: String,  // Komposisi tanaman
+    val komposisi: String,
 
-    @SerializedName("kegunaan")
-    val kegunaan: String,  // Kegunaan tanaman
+    @SerializedName("manfaat")
+    val manfaat: String,
 
     @SerializedName("dosis")
-    val dosis: String,  // Dosis penggunaan tanaman
+    val dosis: String,
 
     @SerializedName("caraPengolahan")
-    val caraPengolahan: String,  // Cara pengolahan tanaman
+    val caraPengolahan: String,
 
     @SerializedName("efekSamping")
-    val efekSamping: String,  // Efek samping dari tanaman
+    val efekSamping: String,
 
     @SerializedName("ipfsHash")
-    val ipfsHash: String,  // Hash dari IPFS yang menyimpan informasi tambahan
+    val ipfsHash: String,
 
     @SerializedName("ratingTotal")
-    val ratingTotal: String = "0",  // Total rating tanaman
+    val ratingTotal: String = "0",
 
     @SerializedName("ratingCount")
-    val ratingCount: String = "0",  // Jumlah rating yang diterima tanaman
+    val ratingCount: String = "0",
 
     @SerializedName("likeCount")
-    val likeCount: String = "0",  // Jumlah like yang diterima tanaman
+    val likeCount: String = "0",
 
     @SerializedName("owner")
-    val owner: String = "",  // Pemilik tanaman
+    val owner: String = "",
 
     @SerializedName("isLikedByUser")
-    val isLikedByUser: Boolean = false,  // Status apakah user telah memberikan like
+    val isLikedByUser: Boolean = false,
 
     @SerializedName("isRatedByUser")
-    val isRatedByUser: Boolean  // Status apakah user telah memberikan rating
+    val isRatedByUser: Boolean
 )

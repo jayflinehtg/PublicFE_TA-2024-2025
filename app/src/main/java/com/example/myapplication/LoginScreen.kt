@@ -5,7 +5,11 @@ import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,13 +20,13 @@ import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.example.myapplication.data.DataClassResponses
-import com.example.myapplication.data.DataClassResponses.LoginResponse
-import com.example.myapplication.data.LoginRequest
+import com.example.myapplication.data.LoginResult
 import com.example.myapplication.data.PreferencesHelper
 import com.example.myapplication.services.RetrofitClient
 import org.json.JSONObject
@@ -34,21 +38,64 @@ import retrofit2.Response
 @Composable
 fun LoginScreen(
     navController: NavController,
-    onLoginSuccess: () -> Unit,
+    viewModel: MainViewModel,
     onNavigateToRegister: () -> Unit
 ) {
     val context = LocalContext.current
-    val walletAddress = PreferencesHelper.getWalletAddress(context)
 
     var password by remember { mutableStateOf("") }
-    var passwordError by remember { mutableStateOf<String?>(null) }
-    var generalError by remember { mutableStateOf<String?>(null) }
+    var passwordErrorLocal by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(walletAddress) {
-        if (walletAddress.isNullOrEmpty()) {
-            Toast.makeText(context, "Wallet address tidak ditemukan, mohon hubungkan wallet Anda.", Toast.LENGTH_LONG).show()
-            navController.navigate("walletComponent") {
-                popUpTo("login") { inclusive = true }
+    val uiState by viewModel.uiState.collectAsState()
+    val loginState = uiState.loginState
+    val isFormEnabled = loginState !is LoginResult.Loading && !uiState.isConnecting
+
+    // Pengecekan wallet address saat layar pertama kali muncul atau saat uiState.walletAddress berubah
+    LaunchedEffect(uiState.walletAddress, uiState.isGuest) {
+        if (uiState.walletAddress.isNullOrEmpty() && !uiState.isGuest) {
+            Toast.makeText(context, "Wallet tidak terhubung. Silakan hubungkan wallet Anda.", Toast.LENGTH_LONG).show()
+            navController.navigate(Screen.WalletComponent.route) {
+                popUpTo(Screen.Login.route) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
+    // Handle hasil operasi login dari ViewModel
+    LaunchedEffect(loginState) {
+        when (loginState) {
+            is LoginResult.Success -> {
+                Toast.makeText(context, "Berhasil masuk!", Toast.LENGTH_SHORT).show()
+                Log.d("LoginScreen", "Login Sukses: ${loginState.message}")
+                viewModel.resetLoginState()
+            }
+            is LoginResult.Error -> {
+                val errorMessage = loginState.errorMessage
+                Log.e("LoginScreen", "Login Error: ${errorMessage}")
+
+                when {
+                    errorMessage.contains("Password salah.", ignoreCase = true) -> {
+                        passwordErrorLocal = "Password yang Anda masukkan salah."
+                    }
+                    errorMessage.contains("Pengguna belum terdaftar.", ignoreCase = true) -> {
+                        Toast.makeText(context, "Akun belum terdaftar, silahkan daftar.", Toast.LENGTH_LONG).show()
+                        onNavigateToRegister()
+                    }
+                    // Handle user cancellation
+                    errorMessage.contains("Login dibatalkan oleh user", ignoreCase = true) -> {
+                        Toast.makeText(context, "Login dibatalkan.", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {
+                        Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
+                    }
+                }
+                viewModel.resetLoginState()
+            }
+            is LoginResult.Loading -> {
+                Log.d("LoginScreen", "LoginState adalah Loading.")
+            }
+            is LoginResult.Idle -> {
+                Log.d("LoginScreen", "LoginState adalah Idle.")
             }
         }
     }
@@ -65,47 +112,31 @@ fun LoginScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 40.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Image(
                 painter = painterResource(id = R.drawable.plant),
                 contentDescription = "Logo Tanaman",
-                modifier = Modifier
-                    .size(130.dp)
-                    .padding(bottom = 8.dp)
+                modifier = Modifier.size(130.dp).padding(bottom = 8.dp)
             )
-
-            Text(
-                text = "LOGIN",
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Bold,
-                color = colorResource(id = R.color.dark_green),
-            )
-
-            Text(
-                text = "Silahkan Masuk!",
-                fontSize = 14.sp,
-                color = colorResource(id = R.color.black)
-            )
+            Text(text = "LOGIN", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = colorResource(id = R.color.dark_green))
+            Text(text = "Silahkan Masuk!", fontSize = 14.sp, color = colorResource(id = R.color.black))
             Spacer(modifier = Modifier.height(16.dp))
 
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = colorResource(id = R.color.green)),
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth(0.85f)
+                modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(0.85f)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Password Input
                     OutlinedTextField(
                         value = password,
                         onValueChange = {
                             password = it
-                            if (passwordError != null) passwordError = null
-                            if (generalError != null) generalError = null
+                            passwordErrorLocal = null
                         },
                         label = { Text("Kata Sandi", color = Color.Black) },
                         placeholder = { Text("Masukkan Kata Sandi") },
@@ -114,113 +145,67 @@ fun LoginScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         shape = RoundedCornerShape(8.dp),
-                        isError = passwordError != null || generalError != null,
+                        isError = passwordErrorLocal != null,
                         colors = TextFieldDefaults.colors(
                             unfocusedContainerColor = Color.White,
                             focusedContainerColor = Color.White,
-                            disabledContainerColor = Color.White,
+                            disabledContainerColor = Color.LightGray,
                             errorContainerColor = Color.White,
-                            errorTextColor = Color.Red,
-                        )
+                            unfocusedIndicatorColor = Color.Gray,
+                            focusedIndicatorColor = colorResource(id = R.color.dark_green)
+                        ),
+                        keyboardOptions = KeyboardOptions.Default.copy(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                passwordErrorLocal = null
+                                viewModel.resetLoginState()
+
+                                if (password.isBlank()) {
+                                    passwordErrorLocal = "Kata sandi tidak boleh kosong."
+                                } else {
+                                    Log.d("LoginScreen_Keyboard", "Memanggil viewModel.performLogin dari keyboard action 'Done'")
+                                    viewModel.performLogin(password)
+                                }
+                            }
+                        ),
+                        enabled = isFormEnabled
                     )
-                    if (passwordError != null) {
-                        Text(
-                            passwordError!!,
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.Start)
-                        )
+                    if (passwordErrorLocal != null) {
+                        Text(passwordErrorLocal!!, color = Color.Red, fontSize = 12.sp, modifier = Modifier.align(Alignment.Start).padding(start = 4.dp))
                     }
-
-                    if (generalError != null) {
-                        Text(
-                            text = generalError!!,
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.Start)
-                        )
-                    }
-
 
                     Spacer(modifier = Modifier.height(30.dp))
 
-                    // Login Button
                     Button(
                         onClick = {
-                            passwordError = null
-                            generalError = null
+                            passwordErrorLocal = null
+                            viewModel.resetLoginState() // Reset state error sebelumnya
 
                             if (password.isBlank()) {
-                                passwordError = "Kata sandi tidak boleh kosong."
+                                passwordErrorLocal = "Kata sandi tidak boleh kosong."
                                 return@Button
                             }
 
-                            // Pindahkan validasi walletAddress ke awal
-                            if (walletAddress.isNullOrEmpty()) {
-                                Toast.makeText(context, "Wallet address tidak ditemukan. Silahkan hubungkan wallet Anda terlebih dahulu.", Toast.LENGTH_LONG).show()
-                                navController.navigate("walletComponent") {
-                                    popUpTo("login") { inclusive = true }
-                                }
-                                return@Button
-                            }
-
-                            val userLogin = LoginRequest(walletAddress, password)
-                            Log.d("Login", "Wallet Address: $walletAddress, Password: $password")
-
-                            RetrofitClient.apiService.loginUser(userLogin).enqueue(object : Callback<LoginResponse> {
-                                override fun onResponse(call: Call<LoginResponse>, response: Response<LoginResponse>) {
-                                    if (response.isSuccessful) {
-                                        Log.d("API", "Login Success: ${response.body()?.message}")
-                                        val token = response.body()?.token ?: ""
-                                        PreferencesHelper.saveJwtToken(context, token)
-                                        Toast.makeText(context, "Berhasil masuk!", Toast.LENGTH_SHORT).show()
-                                        onLoginSuccess()
-                                        navController.navigate("home") {
-                                            popUpTo("login") { inclusive = true }
-                                        }
-                                    } else {
-                                        val errorBodyString = response.errorBody()?.string()
-                                        Log.e("API", "Login Failed: ${response.code()} - $errorBodyString")
-
-                                        var displayErrorMessage = "Terjadi kesalahan saat masuk."
-                                        try {
-                                            val errorJson = JSONObject(errorBodyString)
-                                            val backendMessage = errorJson.optString("message", "unknown_error")
-
-                                            if (backendMessage == "Login gagal: Password salah") {
-                                                displayErrorMessage = "Kredensial yang diinput tidak valid."
-                                                generalError = displayErrorMessage
-                                            } else if (backendMessage.contains("Login gagal: User not registered", ignoreCase = true)) { // Contoh: Jika backend Anda mengirim ini
-                                                displayErrorMessage = "Akun tidak terdaftar. Silahkan daftar."
-                                                generalError = displayErrorMessage
-                                            }
-                                            else {
-                                                displayErrorMessage = backendMessage
-                                                generalError = displayErrorMessage
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.e("API", "Error parsing error body: ${e.message}")
-                                            generalError = "Kredensial yang diinput tidak valid."
-                                        }
-                                        Toast.makeText(context, displayErrorMessage, Toast.LENGTH_LONG).show()
-                                    }
-                                }
-
-                                override fun onFailure(call: Call<LoginResponse>, t: Throwable) {
-                                    Log.e("API", "Error: ${t.message}", t)
-                                    generalError = "Tidak dapat terhubung ke server."
-                                    Toast.makeText(context, "Koneksi gagal: ${t.message}", Toast.LENGTH_LONG).show()
-                                }
-                            })
+                            // Wallet address akan diambil oleh ViewModel dari ethereum.selectedAddress
+                            Log.d("LoginScreen_Button", "Memanggil viewModel.performLogin")
+                            viewModel.performLogin(password)
                         },
+                        enabled = isFormEnabled,
                         colors = ButtonDefaults.buttonColors(containerColor = colorResource(id = R.color.dark_green)),
                         shape = RoundedCornerShape(50),
-                        modifier = Modifier.fillMaxWidth(0.8f)
+                        modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
                     ) {
-                        Text("Masuk", fontSize = 14.sp, color = Color.White)
+                        if (loginState is LoginResult.Loading || uiState.isConnecting) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text("Masuk", fontSize = 16.sp, color = Color.White)
+                        }
                     }
 
-                    TextButton(onClick = onNavigateToRegister) {
+                    TextButton(onClick = onNavigateToRegister, enabled = isFormEnabled) {
                         Text(
                             "Belum memiliki akun? Daftar disini",
                             fontSize = 12.sp,
@@ -229,6 +214,7 @@ fun LoginScreen(
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }

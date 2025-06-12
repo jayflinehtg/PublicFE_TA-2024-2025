@@ -12,6 +12,10 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import javax.inject.Singleton
 import com.example.myapplication.services.RetrofitClient // Mengimpor RetrofitClient
+import com.example.myapplication.services.TokenRefreshInterceptor
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import java.util.concurrent.TimeUnit
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -22,27 +26,24 @@ internal object AppModule {
      */
     @Provides
     fun provideDappMetadata(@ApplicationContext context: Context): DappMetadata {
+        // Anda bisa menyesuaikan nama dan URL ini agar lebih deskriptif untuk DApp Anda
+        val appName = context.applicationInfo.loadLabel(context.packageManager).toString().replace(" ", "").toLowerCase()
         return DappMetadata(
-            name = context.applicationInfo.name,
-            url = "https://${context.applicationInfo.name}.com",
-            iconUrl = "https://cdn.sstatic.net/Sites/stackoverflow/Img/apple-touch-icon.png"
+            name = context.applicationInfo.loadLabel(context.packageManager).toString(), // Nama aplikasi Anda
+            url = "https://${appName}.tea.xyz", // Ganti dengan URL DApp Anda yang sebenarnya
+            iconUrl = "https://cdn.sstatic.net/Sites/stackoverflow/Img/apple-touch-icon.png" // Ganti dengan URL ikon DApp Anda
         )
     }
 
     @Provides
     fun provideEthereumFlow(@ApplicationContext context: Context, dappMetadata: DappMetadata): EthereumFlow {
-        // Mengambil konfigurasi dari RetrofitClient dan memilih jaringan yang aktif
-        val infuraApiKey = RetrofitClient.ETH_INFURA_API_KEY // Mengambil Infura API Key dari RetrofitClient
+        val infuraApiKey: String? = null
 
-        // Pilih jaringan yang digunakan di sini, tinggal uncomment yang digunakan
         val readonlyRPCMap = mapOf(
-            // Ganache
-            "Ganache" to "http://192.168.1.104:7545" // RPC URL untuk Ganache
-            // Tea-Sepolia
-            // "Tea-Sepolia" to RetrofitClient.ETH_RPC_URL // RPC URL untuk Tea-Sepolia
+            "Public" to RetrofitClient.PUBLIC_RPC_URL
         )
 
-        // Membuat SDKOptions dengan Infura API Key dan readonlyRPCMap
+        // Membuat SDKOptions
         val sdkOptions = SDKOptions(
             infuraAPIKey = infuraApiKey,
             readonlyRPCMap = readonlyRPCMap
@@ -57,16 +58,24 @@ internal object AppModule {
 
     @Provides
     @Singleton
-    fun provideRetrofit(): Retrofit {
-        return Retrofit.Builder()
-            .baseUrl(RetrofitClient.BASE_URL) // Menggunakan BASE_URL yang ada di RetrofitClient
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
+    fun provideTokenRefreshInterceptor(
+        @ApplicationContext context: Context
+    ): TokenRefreshInterceptor {
+        return TokenRefreshInterceptor(context)
     }
 
     @Provides
     @Singleton
-    fun provideApiService(retrofit: Retrofit): ApiService {
-        return retrofit.create(ApiService::class.java)
+    fun provideRetrofitClient(
+        @ApplicationContext context: Context,
+        tokenRefreshInterceptor: TokenRefreshInterceptor
+    ): RetrofitClient {
+        return RetrofitClient(context, tokenRefreshInterceptor)
+    }
+
+    @Provides
+    @Singleton
+    fun provideApiService(retrofitClient: RetrofitClient): ApiService {
+        return retrofitClient.getRetrofit().create(ApiService::class.java)
     }
 }

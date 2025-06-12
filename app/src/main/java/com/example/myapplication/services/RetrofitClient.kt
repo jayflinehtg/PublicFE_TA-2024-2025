@@ -1,23 +1,45 @@
 package com.example.myapplication.services
 
+import android.content.Context
 import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
 
-object RetrofitClient {
+@Singleton
+class RetrofitClient @Inject constructor(
+    private val context: Context,
+    private val tokenRefreshInterceptor: TokenRefreshInterceptor
+) {
 
-    // Base URL untuk API
-    const val BASE_URL = "http://192.168.1.104:5000/api/"  // Semua route, termasuk IPFS
+    companion object {
+        const val BASE_URL = "http://192.168.1.101:5000/api/"
+        const val SMART_CONTRACT_ADDRESS = "0xC1e7C226F8B259B21e1462EECA4eE1d264C3dAA4"
+        const val PUBLIC_RPC_URL = "https://tea-sepolia.g.alchemy.com/public"
+    }
 
-    // Konfigurasi Ethereum
-    const val ETH_INFURA_API_KEY = "98144ec0a3b54b3582ccdd2e99921cf5"
+    private val retrofitInstance: Retrofit by lazy {
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BODY
+        }
 
-    // Retrofit instance untuk API service
-    private val retrofit = Retrofit.Builder()
-        .baseUrl(BASE_URL)
-        .addConverterFactory(GsonConverterFactory.create())
-        .client(OkHttpClient())
-        .build()
+        val okHttpClient = OkHttpClient.Builder()
+            .addInterceptor(loggingInterceptor)
+            .addInterceptor(tokenRefreshInterceptor) // Tambahkan token refresh interceptor
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
 
-    val apiService: ApiService = retrofit.create(ApiService::class.java)
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+    }
+
+    fun getRetrofit(): Retrofit = retrofitInstance
 }
