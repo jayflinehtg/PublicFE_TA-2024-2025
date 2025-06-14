@@ -12,6 +12,8 @@
     import androidx.compose.foundation.text.KeyboardOptions
     import androidx.compose.foundation.verticalScroll
     import androidx.compose.material.icons.Icons
+    import androidx.compose.material.icons.automirrored.filled.ArrowBack
+    import androidx.compose.material.icons.automirrored.filled.ArrowForward
     import androidx.compose.material.icons.automirrored.filled.Send
     import androidx.compose.material.icons.filled.ArrowBack
     import androidx.compose.material.icons.filled.Edit
@@ -34,17 +36,21 @@
     import androidx.compose.ui.text.TextStyle
     import androidx.compose.ui.text.font.FontWeight
     import androidx.compose.ui.text.input.ImeAction
+    import androidx.compose.ui.text.style.TextAlign
     import androidx.compose.ui.unit.dp
     import androidx.compose.ui.unit.sp
     import androidx.hilt.navigation.compose.hiltViewModel
     import androidx.lifecycle.Lifecycle
     import androidx.lifecycle.LifecycleEventObserver
     import androidx.lifecycle.compose.LocalLifecycleOwner
+    import androidx.lifecycle.viewModelScope
     import coil.compose.rememberAsyncImagePainter
     import com.example.myapplication.data.*
+    import com.example.myapplication.data.DataClassResponses.Comment
     import com.example.myapplication.services.RetrofitClient
     import io.metamask.androidsdk.EthereumFlow
     import kotlinx.coroutines.delay
+    import kotlinx.coroutines.launch
     import java.text.SimpleDateFormat
     import java.util.*
 
@@ -84,13 +90,48 @@
 
         val isLoggedIn = true
 
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> {
+                        Log.d("DetailScreen", "App resumed - checking for data refresh")
+
+                        // refresh saat kembali dari metamask
+                        if (plant != null) {
+                            Log.d("DetailScreen", "Force refreshing plant detail on resume")
+                            viewModel.refreshPlantDetail(plantId, null)
+                        }
+
+                        // Handle stuck comment loading
+                        if (commentPlantState is CommentPlantResult.Loading) {
+                            Log.d("DetailScreen", "Comment loading detected on resume - applying timeout")
+                            viewModel.viewModelScope.launch {
+                                delay(2500) // Reduced timeout untuk faster response
+                                if (viewModel.uiState.value.commentPlantState is CommentPlantResult.Loading) {
+                                    Log.w("DetailScreen", "Comment timeout - resetting state and refreshing")
+                                    viewModel.resetCommentPlantState()
+                                    viewModel.refreshPlantDetail(plantId, null)
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+            }
+
+            lifecycleOwner.lifecycle.addObserver(observer)
+
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        }
+
         // Handle untuk refresh data
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 when (event) {
                     Lifecycle.Event.ON_RESUME -> {
                         Log.d("DetailScreen", "App resumed - checking for data refresh")
-                        // Refresh data saat app resume dari MetaMask
                         if (plant != null) {
                             viewModel.refreshPlantDetail(plantId, null)
                         }
@@ -120,7 +161,7 @@
                 is LikePlantResult.Success -> {
                     Toast.makeText(context, "Aksi like/unlike berhasil", Toast.LENGTH_SHORT).show()
                     viewModel.resetLikePlantState()
-                    delay(3000) // Menununggu 3 detik
+                    delay(2500) // Menununggu 3 detik
                     viewModel.refreshPlantDetail(plantId, null)
                 }
                 is LikePlantResult.Error -> {
@@ -152,6 +193,8 @@
                 is RatePlantResult.Success -> {
                     Toast.makeText(context, "Rating berhasil dikirim", Toast.LENGTH_SHORT).show()
                     viewModel.resetRatePlantState()
+                    delay(3500)
+                    viewModel.refreshPlantDetail(plantId, null)
                 }
                 is RatePlantResult.Error -> {
                     val errorMessage = ratePlantState.errorMessage
@@ -176,6 +219,18 @@
                     commentText = ""
                     focusManager.clearFocus()
                     viewModel.resetCommentPlantState()
+                    delay(3500)
+                    viewModel.refreshPlantDetail(plantId, null)
+                }
+                is CommentPlantResult.Loading -> {
+                    launch {
+                        delay(10000) // 10 detik timeout
+                        if (commentPlantState is CommentPlantResult.Loading) {
+                            Log.w("DetailScreen", "Comment loading timeout - resetting state")
+                            viewModel.resetCommentPlantState()
+                            viewModel.refreshPlantDetail(plantId, null)
+                        }
+                    }
                 }
                 is CommentPlantResult.Error -> {
                     val errorMessage = commentPlantState.errorMessage
@@ -240,7 +295,6 @@
                     onCommentChange = { commentText = it },
                     onSendComment = {
                         if (commentText.isNotBlank()) {
-                            // **PERBAIKAN: Tidak perlu token parameter - LAYOUT TETAP SAMA**
                             viewModel.performCommentPlant(plantId, commentText)
                         }
                     },
@@ -323,21 +377,12 @@
                     Text("Disukai oleh ${plant.likeCount} pengguna", fontSize = 14.sp)
 
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text("Komentar Pengguna:", fontWeight = FontWeight.Bold, fontSize = 18.sp)
 
-                    if (comments.isEmpty()) {
-                        Text("Belum ada komentar.", modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray)
-                    } else {
-                        comments.forEach { c ->
-                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text("${c.fullName} (${c.publicKey})", fontWeight = FontWeight.Bold)
-                                    Text(c.comment)
-                                    Text(formatTimestamp(c.timestamp), fontSize = 12.sp, color = Color.Gray)
-                                }
-                            }
-                        }
-                    }
+                    CommentsSection(
+                        comments = comments,
+                        plantId = plantId,
+                        viewModel = viewModel
+                    )
                 }
             } else {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -435,6 +480,107 @@
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
             Text("$label:", fontWeight = FontWeight.Bold)
             Text(value)
+        }
+    }
+
+    @Composable
+    private fun CommentsSection(
+        comments: List<Comment>,
+        plantId: String,
+        viewModel: PlantViewModel
+    ) {
+        var currentPage by remember { mutableStateOf(1) }
+        val commentsPerPage = 5
+        val totalPages = if (comments.isEmpty()) 1 else (comments.size + commentsPerPage - 1) / commentsPerPage
+
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Komentar Pengguna:", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+
+                // Pagination controls untuk komentar
+                if (comments.size > commentsPerPage) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(
+                            onClick = { currentPage = (currentPage - 1).coerceAtLeast(1) },
+                            enabled = currentPage > 1
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Previous")
+                        }
+
+                        Text(
+                            "$currentPage / $totalPages",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+
+                        IconButton(
+                            onClick = { currentPage = (currentPage + 1).coerceAtMost(totalPages) },
+                            enabled = currentPage < totalPages
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowForward, "Next")
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (comments.isEmpty()) {
+                Text("Belum ada komentar.", modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray)
+            } else {
+                val startIndex = (currentPage - 1) * commentsPerPage
+                val endIndex = (startIndex + commentsPerPage).coerceAtMost(comments.size)
+                val paginatedComments = comments.subList(startIndex, endIndex)
+
+                paginatedComments.forEach { comment ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                "${comment.fullName} (${comment.publicKey})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                comment.comment,
+                                fontSize = 14.sp,
+                                color = Color.Black
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                formatTimestamp(comment.timestamp),
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
+
+                // Show total comments info
+                if (comments.size > commentsPerPage) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Menampilkan ${startIndex + 1}-${endIndex} dari ${comments.size} komentar",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
         }
     }
 

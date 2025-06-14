@@ -289,7 +289,6 @@ fun AddPlant(
                             efekSamping = efekSamping,
                             ipfsHash = ipfsCid
                         )
-                        // **PERBAIKAN: Tidak perlu token parameter**
                         viewModel.performAddPlant(request)
                     },
                     enabled = isFormEnabled,
