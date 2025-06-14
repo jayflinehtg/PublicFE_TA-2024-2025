@@ -14,7 +14,6 @@ import com.example.myapplication.data.DataClassResponses.UserInfoResponse
 import com.example.myapplication.data.IPFSResponse
 import com.example.myapplication.data.LoginRequest
 import com.example.myapplication.data.PaginatedPlantResponse
-import com.example.myapplication.data.PlantListResponse
 import okhttp3.MultipartBody
 import okhttp3.ResponseBody
 import retrofit2.Call
@@ -92,12 +91,17 @@ interface ApiService {
         @Query("namaLatin") namaLatin: String = "",
         @Query("komposisi") komposisi: String = "",
         @Query("manfaat") manfaat: String = ""
-    ): PlantListResponse
+    ): DataClassResponses.SearchPlantsResponse
 
     @GET("plants/plant/averageRating/{plantId}")
     suspend fun getAverageRating(
         @Path("plantId") plantId: String
     ): AverageRatingResponse
+
+    @GET("plants/{plantId}/ratings")
+    suspend fun getPlantRatings(
+        @Path("plantId") plantId: String
+    ): DataClassResponses.PlantRatingsResponse
 
     @GET("plants/{plantId}/comments")
     suspend fun getPaginatedComments( // Nama diubah untuk kejelasan

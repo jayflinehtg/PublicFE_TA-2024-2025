@@ -23,6 +23,7 @@ import io.metamask.androidsdk.EthereumFlow
 import io.metamask.androidsdk.EthereumMethod
 import io.metamask.androidsdk.EthereumRequest
 import io.metamask.androidsdk.Result
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -322,7 +323,6 @@ class MainViewModel @Inject constructor(
                 PreferencesHelper.saveUserFullName(context, loginApiResponse.userData.fullName ?: "")
                 PreferencesHelper.saveUserRegistrationStatus(context, loginApiResponse.userData.isRegistered)
 
-                // **Hanya sampai sini jika backend berhasil dan tidak ada error login**
                 Log.d("MainViewModel_Login", "Memulai transaksi on-chain untuk login...")
 
                 val loginTransactionDataHex = loginApiResponse.loginTransactionData
@@ -498,9 +498,9 @@ class MainViewModel @Inject constructor(
 
                     val transactionResult = ethereum.sendRequest(request)
 
-                    when (val specificResult = transactionResult) {
+                    when (transactionResult) {
                         is Result.Success.Item -> {
-                            val txHash = specificResult.value
+                            val txHash = transactionResult.value
                             if (txHash.isNotEmpty()) {
                                 Log.d("MainViewModel_Logout", "Transaksi logout on-chain berhasil: $txHash")
                                 serverMessage += " Logout on-chain berhasil dengan txHash: $txHash"
@@ -509,40 +509,19 @@ class MainViewModel @Inject constructor(
                                 serverMessage += " Logout on-chain sukses tapi txHash tidak valid."
                             }
                         }
-
-                        is Result.Success.Items -> {
-                            val txHashes = specificResult.value
-                            if (txHashes.isNotEmpty()) {
-                                Log.d("MainViewModel_Logout", "Transaksi logout on-chain berhasil: ${txHashes[0]}")
-                                serverMessage += " Logout on-chain berhasil dengan txHash: ${txHashes[0]}"
-                            } else {
-                                Log.w("MainViewModel_Logout", "Logout on-chain sukses tapi txHashes kosong")
-                                serverMessage += " Logout on-chain sukses tapi txHashes kosong."
-                            }
-                        }
-
-                        is Result.Success.ItemMap -> {
-                            val txMap = specificResult.value
-                            val txHash = txMap["txHash"] as? String
-                            if (!txHash.isNullOrEmpty()) {
-                                Log.d("MainViewModel_Logout", "Transaksi logout on-chain berhasil: $txHash")
-                                serverMessage += " Logout on-chain berhasil dengan txHash: $txHash"
-                            } else {
-                                Log.w("MainViewModel_Logout", "Logout on-chain sukses tapi txHash tidak ditemukan di map")
-                                serverMessage += " Logout on-chain sukses tapi txHash tidak ditemukan."
-                            }
-                        }
-
                         is Result.Error -> {
-                            val error = specificResult.error
+                            val error = transactionResult.error
                             Log.e("MainViewModel_Logout", "Transaksi logout on-chain GAGAL: ${error.message} (Code: ${error.code})")
 
-                            // Cek jika error karena user menolak transaksi
                             if (error.code == 4001 || error.message.contains("user rejected", ignoreCase = true)) {
                                 throw Exception("User membatalkan transaksi logout")
                             } else {
                                 serverMessage += " Logout on-chain gagal: ${error.message}."
                             }
+                        }
+                        else -> {
+                            Log.d("MainViewModel_Logout", "Logout on-chain completed with result: $transactionResult")
+                            serverMessage += " Logout on-chain berhasil."
                         }
                     }
                 } catch (e: Exception) {
@@ -551,7 +530,7 @@ class MainViewModel @Inject constructor(
                     // Jika user membatalkan, jangan lanjutkan disconnect
                     if (e.message?.contains("user rejected", ignoreCase = true) == true ||
                         e.message?.contains("User membatalkan", ignoreCase = true) == true) {
-                        throw e // Re-throw untuk menghentikan proses
+                        throw e
                     }
 
                     serverMessage += " Error logout on-chain: ${e.message}."
@@ -625,34 +604,38 @@ class MainViewModel @Inject constructor(
 
                 when (appLogoutOutcome) {
                     is LogoutResult.Success -> {
-                        disconnectWallet()
                         sendUiMessage(appLogoutOutcome.message)
+
+                        _uiState.update { it.copy(shouldCleanupAfterLogout = true) }
                     }
                     is LogoutResult.Error -> {
                         if (appLogoutOutcome.errorMessage.contains("User membatalkan", ignoreCase = true) ||
                             appLogoutOutcome.errorMessage.contains("user rejected", ignoreCase = true)) {
-                            // Jangan disconnect jika user cancel
                             sendUiMessage("Logout dibatalkan oleh user")
                         } else {
-                            // Untuk error lain, tetap disconnect tapi beri peringatan
-                            disconnectWallet()
                             sendUiMessage("Logout dengan error: ${appLogoutOutcome.errorMessage}")
+                            _uiState.update { it.copy(shouldCleanupAfterLogout = true) }
                         }
                     }
                     else -> {
-                        disconnectWallet()
                         sendUiMessage("Proses logout selesai.")
+                        _uiState.update { it.copy(shouldCleanupAfterLogout = true) }
                     }
                 }
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Error dalam logoutAndDisconnect: ${e.message}", e)
                 sendUiMessage("Error logout: ${e.message}")
+                _uiState.update { it.copy(shouldCleanupAfterLogout = true) }
             } finally {
                 _uiState.update { it.copy(isConnecting = false) }
             }
-
-            Log.d("MainViewModel", "Logout dan disconnect wallet selesai.")
         }
+    }
+
+    fun performCleanupAndNavigate() {
+        cleanupLocalSessionData(navigateToWallet = false)
+        disconnectWallet()
+        _uiState.update { it.copy(shouldCleanupAfterLogout = false) }
     }
 
     private fun connectWallet() {

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -19,10 +20,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavController
 import com.example.myapplication.data.LogoutResult
 import com.example.myapplication.data.PreferencesHelper
 import com.example.myapplication.data.UiEvent
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewModel()) {
@@ -32,6 +39,46 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
     val isLoggedIn = uiState.isLoggedIn
     val logoutState = uiState.logoutState
     val isConnecting = uiState.isConnecting
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    Log.d("ProfileScreen", "App resumed - checking logout state")
+
+                    if (logoutState is LogoutResult.Success) {
+                        Log.d("ProfileScreen", "Logout success detected on resume - navigating immediately")
+                        navController.navigate("walletconnect") {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+
+                    // Handle stuck loading state
+                    if (logoutState is LogoutResult.Loading) {
+                        Log.d("ProfileScreen", "Logout loading detected on resume - applying timeout")
+                        viewModel.viewModelScope.launch {
+                            delay(3500) // 3.5 detik timeout
+                            if (viewModel.uiState.value.logoutState is LogoutResult.Loading) {
+                                Log.w("ProfileScreen", "Logout timeout - forcing navigation")
+                                viewModel.resetLogoutState()
+                                navController.navigate("walletconnect") {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     // Event handler untuk pesan umum dan navigasi
     LaunchedEffect(Unit) {
@@ -62,15 +109,18 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
         when (logoutState) {
             is LogoutResult.Success -> {
                 Log.d("ProfileScreen", "Logout berhasil: ${logoutState.message}")
-                Toast.makeText(context, "Logout berhasil: ${logoutState.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Logout berhasil", Toast.LENGTH_SHORT).show()
                 viewModel.resetLogoutState()
+
+                navController.navigate("walletconnect") {
+                    popUpTo(0) { inclusive = true }
+                }
             }
             is LogoutResult.Error -> {
                 val errorMessage = logoutState.errorMessage
                 Log.e("ProfileScreen", "Logout gagal: $errorMessage")
 
                 val toastMessage = when {
-                    // Handle user cancellation
                     errorMessage.contains("User membatalkan", ignoreCase = true) ||
                             errorMessage.contains("Logout dibatalkan", ignoreCase = true) ->
                         "Logout dibatalkan."
@@ -81,11 +131,19 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
                 viewModel.resetLogoutState()
             }
             is LogoutResult.Loading -> {
-                Log.d("ProfileScreen", "Proses logout sedang berlangsung...")
+                Log.d("ProfileScreen", "Logout loading state active")
+                launch {
+                    delay(5000) // 10 seconds timeout
+                    if (logoutState is LogoutResult.Loading) {
+                        Log.w("ProfileScreen", "Logout loading timeout - forcing navigation")
+                        viewModel.resetLogoutState()
+                        navController.navigate("walletconnect") {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                }
             }
-            is LogoutResult.Idle -> {
-                Log.d("ProfileScreen", "Profile sedang Idle...")
-            }
+            else -> {}
         }
     }
 

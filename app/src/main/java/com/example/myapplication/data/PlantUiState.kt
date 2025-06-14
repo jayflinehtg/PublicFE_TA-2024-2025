@@ -3,6 +3,39 @@ package com.example.myapplication.data
 import com.example.myapplication.data.DataClassResponses.Comment
 import com.example.myapplication.data.DataClassResponses.RatedPlant
 
+data class PlantUiState(
+    val isLoading: Boolean = false,
+    val selectedPlant: PlantResponse? = null,
+    val plantList: List<RatedPlant> = emptyList(),
+    val totalPlants: Int = 0,
+    val currentPage: Int = 1,
+    val selectedRating: Double = 0.0,
+    val ownerFullName: String = "",
+
+    val addPlantState: AddPlantResult = AddPlantResult.Idle,
+    val editPlantState: EditPlantResult = EditPlantResult.Idle,
+    val likePlantState: LikePlantResult = LikePlantResult.Idle,
+    val ratePlantState: RatePlantResult = RatePlantResult.Idle,
+    val commentPlantState: CommentPlantResult = CommentPlantResult.Idle,
+
+    val ipfsUploadState: IPFSUploadResult = IPFSUploadResult.Idle,
+
+    val plantComments: List<Comment> = emptyList(),
+    val commentCurrentPage: Int = 1,
+    val canLoadMoreComments: Boolean = true,
+    val isLoadingMoreComments: Boolean = false,
+
+    val searchResults: List<PlantResponse> = emptyList(),
+    val isSearching: Boolean = false
+)
+
+sealed interface PlantDataResult {
+    object Idle : PlantDataResult
+    object Loading : PlantDataResult
+    data class Success(val plant: PlantResponse) : PlantDataResult
+    data class Error(val errorMessage: String) : PlantDataResult
+}
+
 sealed interface AddPlantResult {
     object Idle : AddPlantResult
     object Loading : AddPlantResult
@@ -31,6 +64,14 @@ sealed interface RatePlantResult {
     data class Error(val errorMessage: String) : RatePlantResult
 }
 
+sealed interface IPFSUploadResult {
+    object Idle : IPFSUploadResult
+    object Loading : IPFSUploadResult
+    data class Success(val cid: String, val message: String = "File berhasil diupload!") : IPFSUploadResult
+    data class Error(val errorMessage: String) : IPFSUploadResult
+}
+
+
 sealed interface CommentPlantResult {
     object Idle : CommentPlantResult
     object Loading : CommentPlantResult
@@ -38,23 +79,3 @@ sealed interface CommentPlantResult {
     data class Error(val errorMessage: String) : CommentPlantResult
 }
 
-data class PlantUiState(
-    val isLoading: Boolean = false,
-    val selectedPlant: PlantResponse? = null,
-    val plantList: List<RatedPlant> = emptyList(),
-    val totalPlants: Int = 0,
-    val currentPage: Int = 1,
-    val selectedRating: Double = 0.0,
-    val ownerFullName: String = "",
-
-    val addPlantState: AddPlantResult = AddPlantResult.Idle,
-    val editPlantState: EditPlantResult = EditPlantResult.Idle,
-    val likePlantState: LikePlantResult = LikePlantResult.Idle,
-    val ratePlantState: RatePlantResult = RatePlantResult.Idle,
-    val commentPlantState: CommentPlantResult = CommentPlantResult.Idle,
-
-    val plantComments: List<Comment> = emptyList(),
-    val commentCurrentPage: Int = 1,
-    val canLoadMoreComments: Boolean = true,
-    val isLoadingMoreComments: Boolean = false
-)

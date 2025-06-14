@@ -33,14 +33,14 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.ArrowBack
 import com.example.myapplication.data.DataClassResponses.EditPlantRequest
 import com.example.myapplication.data.EditPlantResult
+import com.example.myapplication.data.IPFSUploadResult
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditPlantScreen(
     navController: NavController,
     plantId: String,
-    viewModel: PlantViewModel = hiltViewModel(),
-    mainViewModel: MainViewModel = hiltViewModel()
+    viewModel: PlantViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -50,6 +50,8 @@ fun EditPlantScreen(
     val plantToEdit = plantUiState.selectedPlant
     val editPlantState = plantUiState.editPlantState
     val isFormEnabled = !plantUiState.isLoading
+
+    val ipfsUploadState = plantUiState.ipfsUploadState
 
     // State untuk form
     var namaTanaman by remember { mutableStateOf("") }
@@ -64,7 +66,6 @@ fun EditPlantScreen(
 
     // State lokal untuk gambar baru
     var newImageUri by remember { mutableStateOf<Uri?>(null) }
-    var isUploading by remember { mutableStateOf(false) }
 
     // State lokal untuk validasi UI
     var namaTanamanError by remember { mutableStateOf<String?>(null) }
@@ -78,14 +79,19 @@ fun EditPlantScreen(
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
-        onResult = { uri -> newImageUri = uri }
+        onResult = { uri ->
+            newImageUri = uri
+            // Reset IPFS state saat pilih gambar baru
+            if (uri != null) {
+                viewModel.resetIPFSUploadState()
+            }
+        }
     )
 
     // Efek untuk memuat data awal saat layar dibuka
     LaunchedEffect(plantId) {
         if (plantToEdit?.id != plantId) {
-            val token = mainViewModel.userToken
-            viewModel.fetchPlantDetail(plantId, token)
+            viewModel.fetchPlantDetail(plantId, null)
         }
     }
 
@@ -109,15 +115,35 @@ fun EditPlantScreen(
             is EditPlantResult.Success -> {
                 Toast.makeText(context, editPlantState.message, Toast.LENGTH_LONG).show()
                 viewModel.resetEditPlantState()
-                navController.popBackStack() // Kembali ke layar detail setelah sukses edit
+                navController.popBackStack()
             }
             is EditPlantResult.Error -> {
-                Toast.makeText(context, editPlantState.errorMessage, Toast.LENGTH_LONG).show()
+                val errorMessage = editPlantState.errorMessage
+                val toastMessage = when {
+                    errorMessage.contains("User membatalkan", ignoreCase = true) ||
+                            errorMessage.contains("dibatalkan oleh user", ignoreCase = true) ->
+                        "Edit tanaman dibatalkan."
+                    else -> errorMessage
+                }
+                Toast.makeText(context, toastMessage, Toast.LENGTH_LONG).show()
                 viewModel.resetEditPlantState()
             }
-            else -> {
+            else -> {}
+        }
+    }
 
+    // Hadle IPFS Upload state
+    LaunchedEffect(ipfsUploadState) {
+        when (ipfsUploadState) {
+            is IPFSUploadResult.Success -> {
+                ipfsHash = ipfsUploadState.cid
+                Toast.makeText(context, "Gambar baru berhasil dikonfirmasi!", Toast.LENGTH_SHORT).show()
             }
+            is IPFSUploadResult.Error -> {
+                Toast.makeText(context, "Upload gagal: ${ipfsUploadState.errorMessage}", Toast.LENGTH_LONG).show()
+                viewModel.resetIPFSUploadState()
+            }
+            else -> {}
         }
     }
 
@@ -181,7 +207,8 @@ fun EditPlantScreen(
                     FormField(label = "Efek Samping", value = efekSamping, errorText = efekSampingError) { efekSamping = it; efekSampingError = null }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Gambar Tanaman (Opsional: Ganti Gambar)", color = Color.Black)
+
+                    Text("Gambar Tanaman Baru (Opsional)", color = Color.Black)
                     Button(
                         onClick = { pickImageLauncher.launch("image/*") },
                         enabled = isFormEnabled,
@@ -194,52 +221,68 @@ fun EditPlantScreen(
                     // Tampilkan preview gambar baru jika dipilih
                     newImageUri?.let { uri ->
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("Preview Gambar Baru:", fontWeight = FontWeight.Medium, color = Color.Black)
+                        Text(
+                            text = when (ipfsUploadState) {
+                                is IPFSUploadResult.Success -> "Preview Gambar Baru (Terkonfirmasi):"
+                                is IPFSUploadResult.Loading -> "Preview Gambar Baru (Sedang Upload):"
+                                else -> "Preview Gambar Baru:"
+                            },
+                            fontWeight = FontWeight.Medium,
+                            color = when (ipfsUploadState) {
+                                is IPFSUploadResult.Success -> Color(0xFF4CAF50)
+                                is IPFSUploadResult.Loading -> Color(0xFFFF9800)
+                                else -> Color.Black
+                            }
+                        )
                         Image(
                             painter = rememberAsyncImagePainter(uri),
                             contentDescription = "Preview Gambar Baru",
-                            modifier = Modifier.fillMaxWidth().height(200.dp).padding(4.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                                .padding(4.dp)
+                                .then(
+                                    // Visual indicator untuk status
+                                    when (ipfsUploadState) {
+                                        is IPFSUploadResult.Success -> Modifier.background(
+                                            Color(0xFF4CAF50).copy(alpha = 0.1f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        else -> Modifier
+                                    }
+                                )
                         )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // --- TOMBOL KONFIRMASI GAMBAR BARU ---
                     newImageUri?.let { uri ->
-                    Spacer(modifier = Modifier.height(20.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = {
                                 scope.launch {
-                                    isUploading = true
-                                    val jwtToken = PreferencesHelper.getJwtToken(context)?.let { "Bearer $it" } ?: ""
-                                    if (jwtToken.isBlank()) {
-                                        Toast.makeText(context, "Sesi tidak valid.", Toast.LENGTH_SHORT).show()
-                                        isUploading = false
-                                        return@launch
-                                    }
-
                                     try {
-                                        val newCid = viewModel.performUploadImage(jwtToken, uri)
-                                        ipfsHash = newCid // Update state ipfsHash dengan CID baru
-                                        newImageUri = null // Kosongkan URI gambar baru setelah berhasil di-upload
-                                        Toast.makeText(context, "Gambar baru berhasil dikonfirmasi!", Toast.LENGTH_SHORT).show()
+                                        viewModel.performUploadImage(uri)
                                     } catch (e: Exception) {
                                         Toast.makeText(context, e.message ?: "Gagal mengunggah gambar.", Toast.LENGTH_LONG).show()
-                                    } finally {
-                                        isUploading = false
                                     }
                                 }
                             },
-                            enabled = !isUploading,
+                            enabled = isFormEnabled && ipfsUploadState !is IPFSUploadResult.Success,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
                             modifier = Modifier.fillMaxWidth().height(50.dp),
                             shape = RoundedCornerShape(50)
                         ) {
-                            if (isUploading) {
-                                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
-                            } else {
-                                Text("Konfirmasi Gambar Baru", color = Color.White)
+                            when (ipfsUploadState) {
+                                is IPFSUploadResult.Loading -> {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                                }
+                                is IPFSUploadResult.Success -> {
+                                    Text("Gambar Terkonfirmasi", color = Color.White)
+                                }
+                                else -> {
+                                    Text("Konfirmasi Gambar Baru", color = Color.White)
+                                }
                             }
                         }
                     }
@@ -280,8 +323,8 @@ fun EditPlantScreen(
                                 hasError = true
                             }
 
-                            if (ipfsHash.isBlank() && newImageUri == null) {
-                                ipfsHashError = "Gambar harus ada (jika baru, konfirmasi terlebih dulu)."
+                            if (ipfsHash.isBlank()) {
+                                ipfsHashError = "Gambar tanaman tidak boleh kosong."
                                 hasError = true
                                 Toast.makeText(context, "Gambar tanaman tidak boleh kosong.", Toast.LENGTH_LONG).show()
                             }
@@ -291,31 +334,24 @@ fun EditPlantScreen(
                                 return@Button
                             }
 
-                            val jwtTokenRaw = PreferencesHelper.getJwtToken(context)
-                            val jwtToken = jwtTokenRaw?.let {
-                                if (it.startsWith("Bearer ")) it else "Bearer $it"
-                            } ?: ""
-                            scope.launch {
-                                val request = EditPlantRequest(
-                                    plantId = plantId,
-                                    name = namaTanaman,
-                                    namaLatin = namaLatin,
-                                    komposisi = komposisi,
-                                    manfaat = manfaat,
-                                    dosis = dosis,
-                                    caraPengolahan = caraPengolahan,
-                                    efekSamping = efekSamping,
-                                    ipfsHash = ipfsHash // Gunakan ipfsHash yang sudah di-update
-                                )
-                                viewModel.performEditPlant(jwtToken, request)
-                            }
+                            val request = EditPlantRequest(
+                                plantId = plantId,
+                                name = namaTanaman,
+                                namaLatin = namaLatin,
+                                komposisi = komposisi,
+                                manfaat = manfaat,
+                                dosis = dosis,
+                                caraPengolahan = caraPengolahan,
+                                efekSamping = efekSamping,
+                                ipfsHash = ipfsHash
+                            )
+                            viewModel.performEditPlant(request)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(50)
-
                     ) {
                         if (editPlantState is EditPlantResult.Loading) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)

@@ -24,6 +24,7 @@ sealed interface LogoutResult {
 
 data class UiState(
     val shouldShowWalletConnect: Boolean = false,
+    val shouldCleanupAfterLogout: Boolean = false,
     val isConnecting: Boolean = false,
     val walletAddress: String? = null,
     val isGuest: Boolean = false,

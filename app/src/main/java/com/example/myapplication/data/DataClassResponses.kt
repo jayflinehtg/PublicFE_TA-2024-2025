@@ -111,9 +111,19 @@ class DataClassResponses {
         @SerializedName("ipfsHash") val ipfsHash: String
     )
 
+    data class SearchPlantsResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("plants") val plants: List<PlantResponse>
+    )
+
     data class AverageRatingResponse(
         @SerializedName("success") val success: Boolean,
         @SerializedName("averageRating") val averageRating: String
+    )
+
+    data class PlantRatingsResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("ratings") val ratings: List<Int>
     )
 
     data class RatePlantRequest(

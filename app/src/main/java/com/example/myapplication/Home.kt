@@ -14,7 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.rounded.Park
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,7 +41,6 @@ fun Home(
     navController: NavController,
     viewModel: PlantViewModel = hiltViewModel()
 ) {
-    // Mengobservasi state terpusat dari ViewModel
     val uiState by viewModel.uiState
 
     // State lokal hanya untuk kontrol UI seperti input teks
@@ -197,27 +196,39 @@ fun PlantCard(ratedPlant: RatedPlant, navController: NavController) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
-            .shadow(4.dp, RoundedCornerShape(16.dp))
-            .clickable { navController.navigate(Screen.Detail.createRoute(ratedPlant.plant.id)) },
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+            .shadow(8.dp, RoundedCornerShape(16.dp)),
+//            .clickable { navController.navigate(Screen.Detail.createRoute(ratedPlant.plant.id)) },
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFFFF)),
         shape = RoundedCornerShape(16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Park,
-                contentDescription = "Plant Icon",
-                tint = Color(0xFF66BB6A),
-                modifier = Modifier.size(50.dp).padding(end = 12.dp)
-            )
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = ratedPlant.plant.name, color = Color(0xFF2E7D32), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = ratedPlant.plant.name,
+                    color = Color(0xFF2E7D32),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
                 Spacer(modifier = Modifier.height(4.dp))
-                StarRating(rating = ratedPlant.averageRating)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StarRating(rating = ratedPlant.averageRating)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    LikesDisplay(likeCount = ratedPlant.plant.likeCount.toIntOrNull() ?: 0)
+                }
             }
-            // Tombol detail dihapus karena sekarang seluruh card bisa diklik
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = { navController.navigate(Screen.Detail.createRoute(ratedPlant.plant.id)) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                shape = RoundedCornerShape(50),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text("Detail", color = Color.White, fontSize = 14.sp)
+            }
         }
     }
 }
@@ -236,6 +247,26 @@ fun StarRating(rating: Double) {
         Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = "(${String.format("%.1f", rating)})", // Format rating agar 1 angka di belakang koma
+            fontSize = 12.sp,
+            color = Color.DarkGray
+        )
+    }
+}
+
+@Composable
+fun LikesDisplay(likeCount: Int) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Favorite,
+            contentDescription = "Like Count",
+            tint = Color(0xFFE53935),
+            modifier = Modifier.size(20.dp)
+        )
+        Text(
+            text = likeCount.toString(),
             fontSize = 12.sp,
             color = Color.DarkGray
         )

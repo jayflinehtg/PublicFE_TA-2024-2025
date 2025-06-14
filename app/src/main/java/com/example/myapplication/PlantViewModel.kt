@@ -46,6 +46,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.example.myapplication.data.IPFSUploadResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -62,30 +63,49 @@ class PlantViewModel @Inject constructor(
     val uiState: State<PlantUiState> = _uiState
 
     private val _uiEvent = MutableSharedFlow<UiEvent>()
-    val uiEvent = _uiEvent.asSharedFlow()
+
+    fun getCurrentUserAddress(): String {
+        return try {
+            val userWalletAddress = ethereum.selectedAddress
+            Log.d("PlantViewModel", "Current wallet address: '$userWalletAddress'")
+
+            if (userWalletAddress.isNullOrEmpty()) {
+                Log.w("PlantViewModel", "selectedAddress is empty, checking PreferencesHelper")
+
+                val savedAddress = PreferencesHelper.getWalletAddress(context)
+                Log.d("PlantViewModel", "savedAddress from preferences: '$savedAddress'")
+
+                savedAddress ?: ""
+            } else {
+                userWalletAddress
+            }
+        } catch (e: Exception) {
+            Log.e("PlantViewModel", "Error getting wallet address: ${e.message}")
+            ""
+        }
+    }
 
     // Fungsi reset state untuk dipanggil dari UI setelah menangani hasil
     fun resetAddPlantState() { _uiState.value = _uiState.value.copy(addPlantState = AddPlantResult.Idle) }
     fun resetEditPlantState() { _uiState.value = _uiState.value.copy(editPlantState = EditPlantResult.Idle) }
+    fun resetIPFSUploadState() { _uiState.value = _uiState.value.copy(ipfsUploadState = IPFSUploadResult.Idle) }
     fun resetLikePlantState() { _uiState.value = _uiState.value.copy(likePlantState = LikePlantResult.Idle) }
     fun resetRatePlantState() { _uiState.value = _uiState.value.copy(ratePlantState = RatePlantResult.Idle) }
     fun resetCommentPlantState() { _uiState.value = _uiState.value.copy(commentPlantState = CommentPlantResult.Idle) }
 
-    val apiServiceInstance get() = apiService
-
-    private fun sendUiMessage(message: String) {
-        viewModelScope.launch {
-            _uiEvent.emit(UiEvent.Message(message))
-        }
-    }
-
     // Fungi untuk Transaksi On-Chain
-    private suspend fun sendPlantTransaction(
-        transactionDataHex: String,
-        actionNameForLog: String
-    ): Result {
-        val userWalletAddress = PreferencesHelper.getWalletAddress(context) ?: ethereum.selectedAddress
-        if (userWalletAddress.isEmpty()) throw ViewModelValidationException("Alamat wallet tidak tersedia.")
+    private suspend fun sendPlantTransaction(transactionDataHex: String, actionNameForLog: String)
+    : Result {
+        val userWalletAddress = try {
+            ethereum.selectedAddress.takeIf { !it.isNullOrEmpty() }
+                ?: PreferencesHelper.getWalletAddress(context)
+                ?: throw ViewModelValidationException("Tidak dapat mendapatkan alamat wallet untuk transaksi.")
+        } catch (e: Exception) {
+            Log.e("PlantViewModel_$actionNameForLog", "Error getting wallet address: ${e.message}")
+            throw ViewModelValidationException("Tidak dapat mendapatkan alamat wallet untuk transaksi.")
+        }
+
+        Log.d("PlantViewModel_$actionNameForLog", "Menggunakan wallet address: $userWalletAddress")
 
         val contractAddress = RetrofitClient.SMART_CONTRACT_ADDRESS
         if (contractAddress.isBlank()) {
@@ -98,7 +118,30 @@ class PlantViewModel @Inject constructor(
         val txParams = mapOf("from" to userWalletAddress, "to" to contractAddress, "data" to transactionDataHex)
         val request = EthereumRequest(method = EthereumMethod.ETH_SEND_TRANSACTION.value, params = listOf(txParams))
         Log.d("PlantViewModel_$actionNameForLog", "Mengirim permintaan transaksi: $request")
-        return ethereum.sendRequest(request)
+        return try {
+            val result = ethereum.sendRequest(request)
+
+            // Log transaction result untuk debugging
+            when (result) {
+                is Result.Success.Item -> {
+                    Log.d("PlantViewModel_$actionNameForLog", "Transaction successful: ${result.value}")
+                }
+                is Result.Success.ItemMap -> {
+                    Log.d("PlantViewModel_$actionNameForLog", "Transaction successful (ItemMap): ${result.value}")
+                }
+                is Result.Success.Items -> {
+                    Log.d("PlantViewModel_$actionNameForLog", "Transaction successful (Items): ${result.value}")
+                }
+                is Result.Error -> {
+                    Log.e("PlantViewModel_$actionNameForLog", "Transaction failed: ${result.error.message}")
+                }
+            }
+
+            result
+        } catch (e: Exception) {
+            Log.e("PlantViewModel_$actionNameForLog", "Exception during transaction: ${e.message}")
+            throw e
+        }
     }
 
     // Fungsi untuk mengambil fullName berdasarkan wallet address (owner)
@@ -118,113 +161,267 @@ class PlantViewModel @Inject constructor(
     }
 
     suspend fun fetchImageBitmapFromIpfs(cid: String): ImageBitmap? {
-        // Pindahkan operasi jaringan dan decoding ke background thread (IO)
         return withContext(Dispatchers.IO) {
             try {
                 Log.d("PlantViewModel_IPFS", "Fetching image from IPFS with CID: $cid")
                 val responseBody = apiService.getFileFromIPFS(cid)
-                // Decode byte stream menjadi bitmap, lalu ubah ke ImageBitmap untuk Compose
-                BitmapFactory.decodeStream(responseBody.byteStream())?.asImageBitmap()
+                val bytes = responseBody.bytes()
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                bitmap?.asImageBitmap()
             } catch (e: Exception) {
                 Log.e("PlantViewModel_IPFS", "Gagal memuat gambar dari IPFS: ${e.message}")
-                null // Kembalikan null jika terjadi error
+                null
             }
         }
     }
 
     // ==================== Tambah Tanaman ====================
-    fun performAddPlant(jwtToken: String, request: AddPlantRequest) {
+    fun performAddPlant(request: AddPlantRequest) {
+        Log.d("PlantViewModel_Add", "performAddPlant untuk: ${request.name}")
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(addPlantState = AddPlantResult.Loading, isLoading = true)
             val outcome = runCatching {
 
-                val prepareResponse = apiService.prepareAddPlant(jwtToken, request)
-                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
-                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data tambah tanaman.")
+                val prepareResponse = try {
+                    val currentToken = PreferencesHelper.getJwtToken(context)
+                    if (currentToken.isNullOrEmpty()) {
+                        throw ViewModelValidationException("Session expired. Silakan login ulang.")
+                    }
+                    apiService.prepareAddPlant("Bearer $currentToken", request)
+                } catch (e: retrofit2.HttpException) {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    Log.e("PlantViewModel_Add", "HTTP Error: ${e.code()} - $errorBody")
+
+                    val errorMessage = try {
+                        val errorJson = com.google.gson.JsonParser.parseString(errorBody ?: "")
+                        errorJson.asJsonObject.get("message")?.asString ?: "Error tidak diketahui"
+                    } catch (parseError: Exception) {
+                        "Error dari server: ${e.message()}"
+                    }
+
+                    throw ViewModelValidationException("Gagal menambah tanaman: $errorMessage")
+                } catch (e: Exception) {
+                    Log.e("PlantViewModel_Add", "Network Error: ${e.message}")
+                    throw ViewModelValidationException("Gagal terhubung ke server: ${e.message}")
                 }
 
-                val transactionResult = sendPlantTransaction(prepareResponse.data.transactionData, "AddPlant")
+                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
+                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
+                }
+
+                val transactionDataHex = prepareResponse.data.transactionData
+
+                Log.d("PlantViewModel_Add", "Memulai transaksi on-chain untuk add plant...")
+
+                val transactionResult = sendPlantTransaction(transactionDataHex, "AddPlant")
 
                 when(val specificResult = transactionResult) {
                     is Result.Success.Item -> {
                         val txHash = specificResult.value
-                        if(txHash.isNotEmpty()) AddPlantResult.Success(txHash, "ID_BARU_TIDAK_DIKETAHUI") else throw Exception("Transaksi tambah tanaman sukses tapi txHash tidak valid.")
+                        if(txHash.isNotEmpty()) txHash else throw Exception("Add plant on-chain sukses tapi txHash tidak valid: $txHash")
                     }
-                    is Result.Error -> throw Exception("Transaksi tambah tanaman ke blockchain gagal: ${specificResult.error.message}")
+                    is Result.Error -> {
+                        val error = specificResult.error
+
+                        if (error.code == 4001 || error.message.contains("user rejected", ignoreCase = true)) {
+                            throw Exception("User membatalkan transaksi add plant")
+                        } else {
+                            throw Exception("Add plant ke blockchain gagal: ${error.message} (Code: ${error.code})")
+                        }
+                    }
                     else -> throw Exception("Tipe hasil sukses tidak terduga: $specificResult")
                 }
             }.fold(
-                onSuccess = { it },
-                onFailure = { AddPlantResult.Error(it.message ?: "Error tidak dikenal saat menambah tanaman.") }
+                onSuccess = { txHash -> AddPlantResult.Success(txHash, "ID_BARU_TIDAK_DIKETAHUI") },
+                onFailure = { throwable ->
+                    val errorMessage = throwable.message ?: "Terjadi kesalahan menambah tanaman"
+                    Log.e("PlantViewModel_Add", "Add plant failed: $errorMessage")
+
+                    when {
+                        errorMessage.contains("Session expired", ignoreCase = true) -> {
+                            AddPlantResult.Error("Session expired. Silakan login ulang.")
+                        }
+                        errorMessage.contains("User membatalkan", ignoreCase = true) -> {
+                            AddPlantResult.Error("Penambahan tanaman dibatalkan oleh user")
+                        }
+                        else -> {
+                            AddPlantResult.Error(errorMessage)
+                        }
+                    }
+                }
             )
+
             _uiState.value = _uiState.value.copy(addPlantState = outcome, isLoading = false)
+
+            if (outcome is AddPlantResult.Success) {
+                Log.d("PlantViewModel_Add", "Add plant berhasil, refreshing plant list...")
+                fetchPlantsByPage(1)
+            }
         }
     }
 
     // ==================== Upload Gambar ====================
-    suspend fun performUploadImage(jwtToken: String, imageUri: Uri): String {
-        var tempFile: File? = null
-        try {
-            tempFile = with(context) {
-                val contentResolver = contentResolver
-                val inputStream = contentResolver.openInputStream(imageUri)
-                val fileName = "upload_${System.currentTimeMillis()}.jpg"
-                val file = File(cacheDir, fileName)
-                inputStream?.use { input -> FileOutputStream(file).use { output -> input.copyTo(output) } }
+    suspend fun performUploadImage(imageUri: Uri): String {
+        return withContext(Dispatchers.IO) {
 
-                val maxSizeInBytes = 2 * 1024 * 1024 // 5 MB
-                val minSizeInBytes = 150 * 1024  // 150 kb
-                if (file.length() > maxSizeInBytes) {
-                    throw ViewModelValidationException("Ukuran gambar maksimal 5MB.")
+            // TAMBAHAN: Update IPFS state ke Loading
+            _uiState.value = _uiState.value.copy(ipfsUploadState = IPFSUploadResult.Loading)
+
+            var tempFile: File? = null
+            try {
+                tempFile = with(context) {
+                    val contentResolver = contentResolver
+                    val inputStream = contentResolver.openInputStream(imageUri)
+                    val fileName = "upload_${System.currentTimeMillis()}.jpg"
+                    val file = File(cacheDir, fileName)
+                    inputStream?.use { input -> FileOutputStream(file).use { output -> input.copyTo(output) } }
+
+                    // Validasi ukuran file
+                    val maxSizeInBytes = 2 * 1024 * 1024 // 2 MB
+                    val minSizeInBytes = 150 * 1024  // 150 kb
+                    if (file.length() > maxSizeInBytes) {
+                        throw ViewModelValidationException("Ukuran gambar maksimal 2MB.")
+                    }
+                    if (file.length() < minSizeInBytes) {
+                        throw ViewModelValidationException("Ukuran gambar minimal 150kb.")
+                    }
+                    file
                 }
-                if (file.length() > minSizeInBytes) {
-                    throw ViewModelValidationException("Ukuran gambar minimal 150kb.")
+
+                val requestBody = tempFile.asRequestBody("image/*".toMediaTypeOrNull())
+                val filePart = MultipartBody.Part.createFormData("file", tempFile.name, requestBody)
+
+                Log.d("PlantViewModel_IPFS", "Mengunggah gambar...")
+
+                // Error handling
+                val response = try {
+                    val currentToken = PreferencesHelper.getJwtToken(context)
+                    apiService.uploadImage("Bearer $currentToken", filePart)
+                } catch (e: retrofit2.HttpException) {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    Log.e("PlantViewModel_IPFS", "HTTP Error: ${e.code()} - $errorBody")
+
+                    val errorMessage = try {
+                        val errorJson = com.google.gson.JsonParser.parseString(errorBody ?: "")
+                        errorJson.asJsonObject.get("message")?.asString ?: "Error tidak diketahui"
+                    } catch (parseError: Exception) {
+                        "Error dari server: ${e.message()}"
+                    }
+
+                    throw ViewModelValidationException("Gagal upload ke IPFS: $errorMessage")
+                } catch (e: Exception) {
+                    Log.e("PlantViewModel_IPFS", "Network Error: ${e.message}")
+                    throw ViewModelValidationException("Gagal terhubung ke IPFS: ${e.message}")
                 }
-                file
+
+                if (!response.success || response.cid.isNullOrEmpty()) {
+                    throw ViewModelValidationException(response.message ?: "Gagal upload ke IPFS")
+                }
+
+                Log.d("PlantViewModel_IPFS", "Upload sukses, CID: ${response.cid}")
+
+                // Update success state
+                _uiState.value = _uiState.value.copy(ipfsUploadState = IPFSUploadResult.Success(response.cid))
+
+                return@withContext response.cid
+
+            } catch (e: Exception) {
+                Log.e("PlantViewModel_IPFS", "Error saat upload ke IPFS: ${e.message}", e)
+
+                // Update error state
+                _uiState.value = _uiState.value.copy(ipfsUploadState = IPFSUploadResult.Error(e.message ?: "Upload failed"))
+
+                throw e
+            } finally {
+                tempFile?.delete()
             }
-
-            val requestBody = tempFile.asRequestBody("image/*".toMediaTypeOrNull())
-            val filePart = MultipartBody.Part.createFormData("file", tempFile.name, requestBody)
-
-            Log.d("PlantViewModel_IPFS", "Mengunggah gambar...")
-            val response = apiService.uploadImage(jwtToken, filePart) // Panggil suspend fun
-            Log.d("PlantViewModel_IPFS", "Upload sukses, CID: ${response.cid}")
-            return response.cid // Kembalikan CID jika sukses
-
-        } catch (e: Exception) {
-            Log.e("PlantViewModel_IPFS", "Error saat upload ke IPFS: ${e.message}", e)
-            throw e // Lemparkan lagi exception agar bisa ditangkap oleh pemanggil
-        } finally {
-            tempFile?.delete()
         }
     }
 
     // ==================== Edit Tanaman =======================
-    fun performEditPlant(jwtToken: String, request: EditPlantRequest) {
+    fun performEditPlant(request: EditPlantRequest) {
+        Log.d("PlantViewModel_Edit", "performEditPlant untuk: ${request.plantId}")
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(editPlantState = EditPlantResult.Loading, isLoading = true)
             val outcome = runCatching {
-                val prepareResponse = apiService.prepareEditPlant(jwtToken, request.plantId, request)
-                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
-                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data edit tanaman.")
+
+                val prepareResponse = try {
+                    val currentToken = PreferencesHelper.getJwtToken(context)
+                    if (currentToken.isNullOrEmpty()) {
+                        throw ViewModelValidationException("Session expired. Silakan login ulang.")
+                    }
+                    apiService.prepareEditPlant("Bearer $currentToken", request.plantId, request)
+                } catch (e: retrofit2.HttpException) {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    Log.e("PlantViewModel_Edit", "HTTP Error: ${e.code()} - $errorBody")
+
+                    val errorMessage = try {
+                        val errorJson = com.google.gson.JsonParser.parseString(errorBody ?: "")
+                        errorJson.asJsonObject.get("message")?.asString ?: "Error tidak diketahui"
+                    } catch (parseError: Exception) {
+                        "Error dari server: ${e.message()}"
+                    }
+
+                    throw ViewModelValidationException("Gagal edit tanaman: $errorMessage")
+                } catch (e: Exception) {
+                    Log.e("PlantViewModel_Edit", "Network Error: ${e.message}")
+                    throw ViewModelValidationException("Gagal terhubung ke server: ${e.message}")
                 }
 
-                val transactionResult = sendPlantTransaction(prepareResponse.data.transactionData, "EditPlant")
+                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
+                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
+                }
+
+                val transactionDataHex = prepareResponse.data.transactionData
+
+                Log.d("PlantViewModel_Edit", "Memulai transaksi on-chain untuk edit plant...")
+
+                val transactionResult = sendPlantTransaction(transactionDataHex, "EditPlant")
 
                 when(val specificResult = transactionResult) {
                     is Result.Success.Item -> {
                         val txHash = specificResult.value
-                        if(txHash.isNotEmpty()) EditPlantResult.Success(txHash, request.plantId) else throw Exception("Transaksi edit sukses tapi txHash tidak valid.")
+                        if(txHash.isNotEmpty()) txHash else throw Exception("Edit plant on-chain sukses tapi txHash tidak valid: $txHash")
                     }
-                    is Result.Error -> throw Exception("Transaksi edit gagal: ${specificResult.error.message}")
+                    is Result.Error -> {
+                        val error = specificResult.error
+
+                        // Handle user cancellation berdasarkan search results
+                        if (error.code == 4001 || error.message.contains("user rejected", ignoreCase = true)) {
+                            throw Exception("User membatalkan transaksi edit plant")
+                        } else {
+                            throw Exception("Edit plant ke blockchain gagal: ${error.message} (Code: ${error.code})")
+                        }
+                    }
                     else -> throw Exception("Tipe hasil sukses tidak terduga: $specificResult")
                 }
             }.fold(
-                onSuccess = { it },
-                onFailure = { EditPlantResult.Error(it.message ?: "Error tidak dikenal saat edit tanaman.") }
+                onSuccess = { txHash -> EditPlantResult.Success(txHash, request.plantId) },
+                onFailure = { throwable ->
+                    val errorMessage = throwable.message ?: "Terjadi kesalahan edit tanaman"
+                    Log.e("PlantViewModel_Edit", "Edit plant failed: $errorMessage")
+
+                    when {
+                        errorMessage.contains("Session expired", ignoreCase = true) -> {
+                            EditPlantResult.Error("Session expired. Silakan login ulang.")
+                        }
+                        errorMessage.contains("User membatalkan", ignoreCase = true) -> {
+                            EditPlantResult.Error("Edit tanaman dibatalkan oleh user")
+                        }
+                        else -> {
+                            EditPlantResult.Error(errorMessage)
+                        }
+                    }
+                }
             )
+
             _uiState.value = _uiState.value.copy(editPlantState = outcome, isLoading = false)
-            if (outcome is EditPlantResult.Success) fetchPlantDetail(request.plantId, jwtToken)
+
+            // Menggunakan token dari PreferencesHelper untuk refresh
+            if (outcome is EditPlantResult.Success) {
+                val currentToken = PreferencesHelper.getJwtToken(context)
+                fetchPlantDetail(request.plantId, currentToken?.let { "Bearer $it" })
+            }
         }
     }
 
@@ -259,13 +456,12 @@ class PlantViewModel @Inject constructor(
     }
 
     // ==================== Pagination Tanaman ====================
-
     fun fetchPlantsByPage(page: Int = 1) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true) // Set loading
             try {
                 // Panggil API untuk mendapatkan data halaman yang diminta
-                val response = apiService.getPaginatedPlants(page, 10) // Asumsi pageSize = 10
+                val response = apiService.getPaginatedPlants(page, 10)
 
                 if (response.success) {
                     // Proses setiap tanaman untuk mendapatkan rating rata-ratanya
@@ -351,13 +547,33 @@ class PlantViewModel @Inject constructor(
         }
     }
 
-    // Untuk Like tanaman
-    fun performLikePlant(token: String, plantId: String) {
+    fun performLikePlant(plantId: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(likePlantState = LikePlantResult.Loading)
-            toggleLikeLocally() // Optimistic UI update
+            toggleLikeLocally()
             val outcome = runCatching {
-                val prepareResponse = apiService.prepareLikePlant(token, LikeRequest(plantId))
+
+                // Error handling
+                val prepareResponse = try {
+                    val currentToken = PreferencesHelper.getJwtToken(context)
+                    apiService.prepareLikePlant("Bearer $currentToken", LikeRequest(plantId))
+                } catch (e: retrofit2.HttpException) {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    Log.e("PlantViewModel_Like", "HTTP Error: ${e.code()} - $errorBody")
+
+                    val errorMessage = try {
+                        val errorJson = com.google.gson.JsonParser.parseString(errorBody ?: "")
+                        errorJson.asJsonObject.get("message")?.asString ?: "Error tidak diketahui"
+                    } catch (parseError: Exception) {
+                        "Error dari server: ${e.message()}"
+                    }
+
+                    throw ViewModelValidationException("Gagal like tanaman: $errorMessage")
+                } catch (e: Exception) {
+                    Log.e("PlantViewModel_Like", "Network Error: ${e.message}")
+                    throw ViewModelValidationException("Gagal terhubung ke server: ${e.message}")
+                }
+
                 if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
                     throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data like.")
                 }
@@ -367,21 +583,42 @@ class PlantViewModel @Inject constructor(
                 when(val specificResult = transactionResult) {
                     is Result.Success.Item -> {
                         val txHash = specificResult.value
-                        if(txHash.isNotEmpty()) LikePlantResult.Success(txHash, plantId) else throw Exception("Transaksi like sukses tapi txHash tidak valid.")
+                        if(txHash.isNotEmpty()) txHash else throw Exception("Like plant on-chain sukses tapi txHash tidak valid: $txHash")
                     }
-                    is Result.Error -> throw Exception("Transaksi like gagal: ${specificResult.error.message}")
+                    is Result.Error -> {
+                        val error = specificResult.error
+
+                        if (error.code == 4001 || error.message.contains("user rejected", ignoreCase = true)) {
+                            throw Exception("User membatalkan transaksi like plant")
+                        } else {
+                            throw Exception("Like plant ke blockchain gagal: ${error.message} (Code: ${error.code})")
+                        }
+                    }
                     else -> throw Exception("Tipe hasil sukses tidak terduga: $specificResult")
                 }
             }.fold(
-                onSuccess = { it },
-                onFailure = {
+                onSuccess = { txHash -> LikePlantResult.Success(txHash, plantId) },
+                onFailure = { throwable ->
                     toggleLikeLocally() // Kembalikan state UI jika transaksi gagal
-                    LikePlantResult.Error(it.message ?: "Error tidak dikenal.")
+                    val errorMessage = throwable.message ?: "Terjadi kesalahan like tanaman"
+                    Log.e("PlantViewModel_Like", "Like plant failed: $errorMessage")
+
+                    when {
+                        errorMessage.contains("User membatalkan", ignoreCase = true) -> {
+                            LikePlantResult.Error("Like tanaman dibatalkan oleh user")
+                        }
+                        else -> {
+                            LikePlantResult.Error(errorMessage)
+                        }
+                    }
                 }
             )
+
             _uiState.value = _uiState.value.copy(likePlantState = outcome)
-            // Selalu refresh data setelahnya untuk memastikan data on-chain terbaru
-            fetchPlantDetail(plantId, token)
+
+            // Refresh dengan token dari PreferencesHelper
+            val currentToken = PreferencesHelper.getJwtToken(context)
+            fetchPlantDetail(plantId, currentToken?.let { "Bearer $it" })
         }
     }
 
@@ -399,36 +636,92 @@ class PlantViewModel @Inject constructor(
         )
     }
 
-    // Untuk Memberi Komentar Pada Tanaman
-    fun performCommentPlant(token: String, plantId: String, comment: String) {
+    fun performCommentPlant(plantId: String, comment: String) {
+        Log.d("PlantViewModel_Comment", "performCommentPlant untuk: $plantId")
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(commentPlantState = CommentPlantResult.Loading)
             val outcome = runCatching {
-                val prepareResponse = apiService.prepareCommentPlant(token, CommentRequest(plantId, comment))
-                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
-                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data komentar.")
+
+                Log.d("PlantViewModel_Comment", "Backend will validate user from JWT token")
+
+                val prepareResponse = try {
+                    val currentToken = PreferencesHelper.getJwtToken(context)
+                    if (currentToken.isNullOrEmpty()) {
+                        throw ViewModelValidationException("Session expired. Silakan login ulang.")
+                    }
+                    apiService.prepareCommentPlant("Bearer $currentToken", CommentRequest(plantId, comment))
+                } catch (e: retrofit2.HttpException) {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    Log.e("PlantViewModel_Comment", "HTTP Error: ${e.code()} - $errorBody")
+
+                    val errorMessage = try {
+                        val errorJson = com.google.gson.JsonParser.parseString(errorBody ?: "")
+                        errorJson.asJsonObject.get("message")?.asString ?: "Error tidak diketahui"
+                    } catch (parseError: Exception) {
+                        "Error dari server: ${e.message()}"
+                    }
+
+                    throw ViewModelValidationException("Gagal comment tanaman: $errorMessage")
+                } catch (e: Exception) {
+                    Log.e("PlantViewModel_Comment", "Network Error: ${e.message}")
+                    throw ViewModelValidationException("Gagal terhubung ke server: ${e.message}")
                 }
 
-                val transactionResult = sendPlantTransaction(prepareResponse.data.transactionData, "CommentPlant")
+                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
+                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
+                }
+
+                val transactionDataHex = prepareResponse.data.transactionData
+
+                Log.d("PlantViewModel_Comment", "Memulai transaksi on-chain untuk comment plant...")
+
+                val transactionResult = sendPlantTransaction(transactionDataHex, "CommentPlant")
 
                 when(val specificResult = transactionResult) {
                     is Result.Success.Item -> {
                         val txHash = specificResult.value
-                        if(txHash.isNotEmpty()) CommentPlantResult.Success(txHash, plantId) else throw Exception("Transaksi komentar sukses tapi txHash tidak valid.")
+                        if(txHash.isNotEmpty()) txHash else throw Exception("Comment plant on-chain sukses tapi txHash tidak valid: $txHash")
                     }
-                    is Result.Error -> throw Exception("Transaksi komentar gagal: ${specificResult.error.message}")
+                    is Result.Error -> {
+                        val error = specificResult.error
+
+                        if (error.code == 4001 || error.message.contains("user rejected", ignoreCase = true)) {
+                            throw Exception("User membatalkan transaksi comment plant")
+                        } else {
+                            throw Exception("Comment plant ke blockchain gagal: ${error.message} (Code: ${error.code})")
+                        }
+                    }
                     else -> throw Exception("Tipe hasil sukses tidak terduga: $specificResult")
                 }
             }.fold(
-                onSuccess = { it },
-                onFailure = { CommentPlantResult.Error(it.message ?: "Error tidak dikenal.") }
+                onSuccess = { txHash -> CommentPlantResult.Success(txHash, plantId) },
+                onFailure = { throwable ->
+                    val errorMessage = throwable.message ?: "Terjadi kesalahan comment tanaman"
+                    Log.e("PlantViewModel_Comment", "Comment plant failed: $errorMessage")
+
+                    when {
+                        errorMessage.contains("Session expired", ignoreCase = true) -> {
+                            CommentPlantResult.Error("Session expired. Silakan login ulang.")
+                        }
+                        errorMessage.contains("User membatalkan", ignoreCase = true) -> {
+                            CommentPlantResult.Error("Comment tanaman dibatalkan oleh user")
+                        }
+                        else -> {
+                            CommentPlantResult.Error(errorMessage)
+                        }
+                    }
+                }
             )
+
             _uiState.value = _uiState.value.copy(commentPlantState = outcome)
-            if (outcome is CommentPlantResult.Success) refreshPlantDetail(plantId, token)
+
+            if (outcome is CommentPlantResult.Success) {
+                val currentToken = PreferencesHelper.getJwtToken(context)
+                refreshPlantDetail(plantId, currentToken?.let { "Bearer $it" })
+            }
         }
     }
 
-    // Untuk mendapatkan komentar pada tanaman
     fun getPlantComments(plantId: String, page: Int = 1, limit: Int = 100) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
@@ -449,32 +742,88 @@ class PlantViewModel @Inject constructor(
         }
     }
 
-    // Untuk Menambahkan Rating pada tanaman
-    fun performRatePlant(token: String, plantId: String, rating: Int) {
+    fun performRatePlant(plantId: String, rating: Int) {
+        Log.d("PlantViewModel_Rate", "performRatePlant untuk: $plantId dengan rating: $rating")
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(ratePlantState = RatePlantResult.Loading)
             val outcome = runCatching {
-                val prepareResponse = apiService.prepareRatePlant(token, RatePlantRequest(plantId, rating))
-                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
-                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data rating.")
+                Log.d("PlantViewModel_Rate", "Backend will validate user from JWT token")
+
+                val prepareResponse = try {
+                    val currentToken = PreferencesHelper.getJwtToken(context)
+                    if (currentToken.isNullOrEmpty()) {
+                        throw ViewModelValidationException("Session expired. Silakan login ulang.")
+                    }
+                    apiService.prepareRatePlant("Bearer $currentToken", RatePlantRequest(plantId, rating))
+                } catch (e: retrofit2.HttpException) {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    Log.e("PlantViewModel_Rate", "HTTP Error: ${e.code()} - $errorBody")
+
+                    val errorMessage = try {
+                        val errorJson = com.google.gson.JsonParser.parseString(errorBody ?: "")
+                        errorJson.asJsonObject.get("message")?.asString ?: "Error tidak diketahui"
+                    } catch (parseError: Exception) {
+                        "Error dari server: ${e.message()}"
+                    }
+
+                    throw ViewModelValidationException("Gagal rate tanaman: $errorMessage")
+                } catch (e: Exception) {
+                    Log.e("PlantViewModel_Rate", "Network Error: ${e.message}")
+                    throw ViewModelValidationException("Gagal terhubung ke server: ${e.message}")
                 }
 
-                val transactionResult = sendPlantTransaction(prepareResponse.data.transactionData, "RatePlant")
+                if (!prepareResponse.success || prepareResponse.data?.transactionData == null) {
+                    throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
+                }
+
+                val transactionDataHex = prepareResponse.data.transactionData
+
+                Log.d("PlantViewModel_Rate", "Memulai transaksi on-chain untuk rate plant...")
+
+                val transactionResult = sendPlantTransaction(transactionDataHex, "RatePlant")
 
                 when(val specificResult = transactionResult) {
                     is Result.Success.Item -> {
                         val txHash = specificResult.value
-                        if(txHash.isNotEmpty()) RatePlantResult.Success(txHash, plantId) else throw Exception("Transaksi rating sukses tapi txHash tidak valid.")
+                        if(txHash.isNotEmpty()) txHash else throw Exception("Rate plant on-chain sukses tapi txHash tidak valid: $txHash")
                     }
-                    is Result.Error -> throw Exception("Transaksi rating gagal: ${specificResult.error.message}")
+                    is Result.Error -> {
+                        val error = specificResult.error
+
+                        if (error.code == 4001 || error.message.contains("user rejected", ignoreCase = true)) {
+                            throw Exception("User membatalkan transaksi rate plant")
+                        } else {
+                            throw Exception("Rate plant ke blockchain gagal: ${error.message} (Code: ${error.code})")
+                        }
+                    }
                     else -> throw Exception("Tipe hasil sukses tidak terduga: $specificResult")
                 }
             }.fold(
-                onSuccess = { it },
-                onFailure = { RatePlantResult.Error(it.message ?: "Error tidak dikenal.") }
+                onSuccess = { txHash -> RatePlantResult.Success(txHash, plantId) },
+                onFailure = { throwable ->
+                    val errorMessage = throwable.message ?: "Terjadi kesalahan rate tanaman"
+                    Log.e("PlantViewModel_Rate", "Rate plant failed: $errorMessage")
+
+                    when {
+                        errorMessage.contains("Session expired", ignoreCase = true) -> {
+                            RatePlantResult.Error("Session expired. Silakan login ulang.")
+                        }
+                        errorMessage.contains("User membatalkan", ignoreCase = true) -> {
+                            RatePlantResult.Error("Rating tanaman dibatalkan oleh user")
+                        }
+                        else -> {
+                            RatePlantResult.Error(errorMessage)
+                        }
+                    }
+                }
             )
+
             _uiState.value = _uiState.value.copy(ratePlantState = outcome)
-            if (outcome is RatePlantResult.Success) fetchPlantDetail(plantId, token)
+
+            if (outcome is RatePlantResult.Success) {
+                val currentToken = PreferencesHelper.getJwtToken(context)
+                fetchPlantDetail(plantId, currentToken?.let { "Bearer $it" })
+            }
         }
     }
 

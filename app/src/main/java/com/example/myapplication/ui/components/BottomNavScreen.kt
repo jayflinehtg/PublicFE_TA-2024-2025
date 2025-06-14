@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 
@@ -29,7 +30,10 @@ fun BottomNavBarScreen(rootNavController: NavHostController, isGuest: Boolean, v
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor = Color(0xFF498553),
+                contentColor = Color.White
+            ) {
                 val currentRoute = bottomNavController.currentBackStackEntryAsState().value?.destination?.route
                 items.forEach { item ->
                     NavigationBarItem(
@@ -44,7 +48,7 @@ fun BottomNavBarScreen(rootNavController: NavHostController, isGuest: Boolean, v
                                         launchSingleTop = true
                                         restoreState = true
                                     }
-                                    viewModel.resetGuestState() // Reset isGuest supaya WalletComponent muncul
+                                    viewModel.resetGuestState()
                                 } else {
                                     bottomNavController.navigate(item.route) {
                                         popUpTo(bottomNavController.graph.startDestinationId) {
@@ -57,7 +61,14 @@ fun BottomNavBarScreen(rootNavController: NavHostController, isGuest: Boolean, v
                             }
                         },
                         icon = { Icon(item.icon, contentDescription = item.label) },
-                        label = { Text(item.label) }
+                        label = { Text(item.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = Color.White,
+                            unselectedIconColor = Color.White.copy(alpha = 0.7f),
+                            unselectedTextColor = Color.White.copy(alpha = 0.7f),
+                            indicatorColor = Color(0xFF81C784)
+                        )
                     )
                 }
             }
