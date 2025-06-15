@@ -28,7 +28,7 @@ class RetrofitClient @Inject constructor(
 
         val okHttpClient = OkHttpClient.Builder()
             .addInterceptor(loggingInterceptor)
-            .addInterceptor(tokenRefreshInterceptor) // Tambahkan token refresh interceptor
+            .addInterceptor(tokenRefreshInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

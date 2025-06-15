@@ -162,9 +162,11 @@ fun EditPlantScreen(
                             Text(
                                 "Edit Data Tanaman",
                                 style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
                                 color = Color(0xFF2E7D32)
                             )
-                            Text("Tanaman Herbal", color = Color(0xFF4CAF50), fontSize = 12.sp)
+
+                            Text("Tanaman Herbal", color = Color(0xFF4CAF50), fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                         }
                     }
                 },
