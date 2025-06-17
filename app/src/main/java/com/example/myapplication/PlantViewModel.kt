@@ -438,7 +438,7 @@ class PlantViewModel @Inject constructor(
                 val response = apiService.searchPlants(name, namaLatin, komposisi, manfaat)
                 val ratedResults = response.plants.map { plant ->
                     val ratingResponse = try { apiService.getAverageRating(plant.id) } catch (e: Exception) { null }
-                    val avgRating = ratingResponse?.averageRating?.toDoubleOrNull() ?: 0.0
+                    val avgRating = ratingResponse?.averageRating?: 0.0
                     RatedPlant(plant, avgRating)
                 }
                 // Update _uiState
@@ -472,7 +472,7 @@ class PlantViewModel @Inject constructor(
                             Log.e("FetchPlants", "Gagal mendapatkan rating untuk plantId: ${plant.id}", e)
                             null
                         }
-                        val avgRating = ratingResponse?.averageRating?.toDoubleOrNull() ?: 0.0
+                        val avgRating = ratingResponse?.averageRating ?: 0.0
                         RatedPlant(plant, avgRating)
                     }
 
@@ -827,6 +827,136 @@ class PlantViewModel @Inject constructor(
         }
     }
 
+    // ==================== TRANSACTION HISTORY ====================
+    private val _transactionHistory = mutableStateOf<List<DataClassResponses.TransactionHistoryItem>>(emptyList())
+    val transactionHistory: State<List<DataClassResponses.TransactionHistoryItem>> = _transactionHistory
+
+    private val _historyPagination = mutableStateOf<DataClassResponses.Pagination?>(null)
+    val historyPagination: State<DataClassResponses.Pagination?> = _historyPagination
+
+    private val _allPlantRecords = mutableStateOf<List<DataClassResponses.PlantRecord>>(emptyList())
+    val allPlantRecords: State<List<DataClassResponses.PlantRecord>> = _allPlantRecords
+
+    private val _recordCount = mutableStateOf("0")
+    val recordCount: State<String> = _recordCount
+
+    // Fungsi untuk mengambil transaction history berdasarkan plantId
+    fun fetchPlantTransactionHistory(
+        plantId: String,
+        page: Int = 1,
+        limit: Int = 10,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                Log.d("TransactionHistory", "Fetching history for plant $plantId, page $page")
+
+                val response = apiService.getPlantTransactionHistory(plantId, page, limit)
+
+                if (response.success) {
+                    _transactionHistory.value = response.data
+                    _historyPagination.value = response.pagination
+
+                    Log.d("TransactionHistory", "Successfully fetched ${response.data.size} transactions")
+                    onSuccess()
+                } else {
+                    Log.e("TransactionHistory", "Failed to fetch transaction history")
+                    onError("Gagal mengambil riwayat transaksi")
+                }
+            } catch (e: Exception) {
+                Log.e("TransactionHistory", "Error fetching transaction history: ${e.message}")
+                onError("Error: ${e.message}")
+            }
+        }
+    }
+
+    // Fungsi untuk mengambil semua plant records
+    fun fetchAllPlantRecords(
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                Log.d("AllRecords", "Fetching all plant records")
+
+                val response = apiService.getAllPlantRecords()
+
+                if (response.success) {
+                    _allPlantRecords.value = response.records
+
+                    Log.d("AllRecords", "Successfully fetched ${response.records.size} records")
+                    onSuccess()
+                } else {
+                    Log.e("AllRecords", "Failed to fetch all plant records")
+                    onError("Gagal mengambil semua record tanaman")
+                }
+            } catch (e: Exception) {
+                Log.e("AllRecords", "Error fetching all plant records: ${e.message}")
+                onError("Error: ${e.message}")
+            }
+        }
+    }
+
+    // Fungsi untuk mengambil single plant record berdasarkan recordId
+    fun fetchPlantRecord(
+        recordId: String,
+        onSuccess: (DataClassResponses.PlantRecord) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                Log.d("PlantRecord", "Fetching record with ID: $recordId")
+
+                val response = apiService.getPlantRecord(recordId)
+
+                if (response.success) {
+                    Log.d("PlantRecord", "Successfully fetched record: ${response.record}")
+                    onSuccess(response.record)
+                } else {
+                    Log.e("PlantRecord", "Failed to fetch plant record")
+                    onError("Gagal mengambil record tanaman")
+                }
+            } catch (e: Exception) {
+                Log.e("PlantRecord", "Error fetching plant record: ${e.message}")
+                onError("Error: ${e.message}")
+            }
+        }
+    }
+
+    // Fungsi untuk mengambil total record count
+    fun fetchRecordCount(
+        onSuccess: (String) -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                Log.d("RecordCount", "Fetching total record count")
+
+                val response = apiService.getRecordCount()
+
+                if (response.success) {
+                    _recordCount.value = response.recordCount
+
+                    Log.d("RecordCount", "Total records: ${response.recordCount}")
+                    onSuccess(response.recordCount)
+                } else {
+                    Log.e("RecordCount", "Failed to fetch record count")
+                    onError("Gagal mengambil jumlah record")
+                }
+            } catch (e: Exception) {
+                Log.e("RecordCount", "Error fetching record count: ${e.message}")
+                onError("Error: ${e.message}")
+            }
+        }
+    }
+
+    // Helper function untuk refresh transaction history (untuk pagination)
+    fun refreshTransactionHistory(plantId: String, page: Int = 1) {
+        fetchPlantTransactionHistory(plantId, page)
+    }
+
+    // Helper function untuk refresh data tanaman
     fun refreshPlantDetail(plantId: String, token: String?) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)

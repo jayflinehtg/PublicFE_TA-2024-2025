@@ -93,7 +93,7 @@ interface ApiService {
         @Query("manfaat") manfaat: String = ""
     ): DataClassResponses.SearchPlantsResponse
 
-    @GET("plants/plant/averageRating/{plantId}")
+    @GET("plants/averageRating/{plantId}")
     suspend fun getAverageRating(
         @Path("plantId") plantId: String
     ): AverageRatingResponse
@@ -122,4 +122,23 @@ interface ApiService {
     suspend fun getFileFromIPFS(
         @Path("cid") cid: String
     ): ResponseBody
+
+    /* ================================ TRANSACTION HISTORY ================================ */
+    @GET("plants/record/{recordId}")
+    suspend fun getPlantRecord(
+        @Path("recordId") recordId: String
+    ): DataClassResponses.PlantRecordResponse
+
+    @GET("plants/records/all")
+    suspend fun getAllPlantRecords(): DataClassResponses.AllPlantRecordsResponse
+
+    @GET("plants/history/{plantId}")
+    suspend fun getPlantTransactionHistory(
+        @Path("plantId") plantId: String,
+        @Query("page") page: Int = 1,
+        @Query("limit") limit: Int = 10
+    ): DataClassResponses.TransactionHistoryResponse
+
+    @GET("plants/records/count")
+    suspend fun getRecordCount(): DataClassResponses.RecordCountResponse
 }

@@ -19,6 +19,7 @@
     import androidx.compose.material.icons.filled.Edit
     import androidx.compose.material.icons.filled.Favorite
     import androidx.compose.material.icons.filled.FavoriteBorder
+    import androidx.compose.material.icons.filled.History
     import androidx.compose.material.icons.filled.Star
     import androidx.compose.material.icons.outlined.StarBorder
     import androidx.compose.material3.*
@@ -44,6 +45,7 @@
     import androidx.lifecycle.LifecycleEventObserver
     import androidx.lifecycle.compose.LocalLifecycleOwner
     import androidx.lifecycle.viewModelScope
+    import androidx.navigation.NavController
     import coil.compose.rememberAsyncImagePainter
     import com.example.myapplication.data.*
     import com.example.myapplication.data.DataClassResponses.Comment
@@ -60,6 +62,7 @@
         plantId: String,
         onBack: () -> Unit,
         onEdit: () -> Unit,
+        navController: NavController,
         viewModel: PlantViewModel = hiltViewModel()
     ) {
         val context = LocalContext.current
@@ -376,7 +379,34 @@
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Disukai oleh ${plant.likeCount} pengguna", fontSize = 14.sp)
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    // Button lihat history
+                    Button(
+                        onClick = {
+                            plant?.id?.let { plantId ->
+                                navController.navigate("transaction_history/${plantId}")
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = "History Icon",
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Lihat History Data Tanaman",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     CommentsSection(
                         comments = comments,
@@ -432,7 +462,7 @@
                     IconButton(onClick = onEdit) {
                         Icon(Icons.Filled.Edit,
                             contentDescription = "Edit Tanaman",
-                            tint = Color(0xFFEAF4E9)
+                            tint = Color.DarkGray
                         )
                     }
                 }

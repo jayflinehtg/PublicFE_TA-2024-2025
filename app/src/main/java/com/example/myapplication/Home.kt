@@ -15,12 +15,16 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -235,18 +239,46 @@ fun PlantCard(ratedPlant: RatedPlant, navController: NavController) {
 
 @Composable
 fun StarRating(rating: Double) {
+    val validRating = rating.takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0
+
     Row(verticalAlignment = Alignment.CenterVertically) {
         repeat(5) { index ->
-            Icon(
-                imageVector = Icons.Default.Star,
-                contentDescription = "Star Rating",
-                tint = if (index < rating.roundToInt()) Color(0xFFFFD700) else Color(0xFFE0E0E0),
-                modifier = Modifier.size(20.dp)
-            )
+            Box {
+                // Bintang kosong
+                Icon(
+                    imageVector = Icons.Default.StarBorder,
+                    contentDescription = "Star Rating Background",
+                    tint = Color(0xFFE0E0E0),
+                    modifier = Modifier.size(20.dp)
+                )
+
+                // Bintang terisi
+                val fillPercentage = when {
+                    validRating >= index + 1 -> 1f // Penuh
+                    validRating > index -> (validRating - index).toFloat() // Sebagian
+                    else -> 0f // Kosong
+                }
+
+                if (fillPercentage > 0) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = "Star Rating Filled",
+                        tint = Color(0xFFFFD700),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clipToBounds()
+                            .drawWithContent {
+                                clipRect(right = size.width * fillPercentage) {
+                                    this@drawWithContent.drawContent()
+                                }
+                            }
+                    )
+                }
+            }
         }
         Spacer(modifier = Modifier.width(4.dp))
         Text(
-            text = "(${String.format("%.1f", rating)})", // Format rating agar 1 angka di belakang koma
+            text = "(${String.format("%.1f", validRating)})",
             fontSize = 12.sp,
             color = Color.DarkGray
         )

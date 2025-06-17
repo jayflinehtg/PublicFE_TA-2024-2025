@@ -118,7 +118,7 @@ class DataClassResponses {
 
     data class AverageRatingResponse(
         @SerializedName("success") val success: Boolean,
-        @SerializedName("averageRating") val averageRating: String
+        @SerializedName("averageRating") val averageRating: Double
     )
 
     data class PlantRatingsResponse(
@@ -159,6 +159,64 @@ class DataClassResponses {
         @SerializedName("message") val message: String,
         @SerializedName("txHash") val txHash: String,
         @SerializedName("plantId") val plantId: String
+    )
+
+    /* ============================ RECORD TANAMAN =========================== */
+    // Data class untuk Plant Record
+    data class PlantRecord(
+        @SerializedName("recordId") val recordId: String,
+        @SerializedName("publicTxHash") val publicTxHash: String,
+        @SerializedName("plantId") val plantId: String,
+        @SerializedName("userAddress") val userAddress: String,
+        @SerializedName("timestamp") val timestamp: String
+    )
+
+    // Data class untuk Transaction History Item
+    data class TransactionHistoryItem(
+        @SerializedName("recordId") val recordId: String,
+        @SerializedName("publicTxHash") val publicTxHash: String,
+        @SerializedName("plantId") val plantId: String,
+        @SerializedName("userAddress") val userAddress: String,
+        @SerializedName("timestamp") val timestamp: String,
+        @SerializedName("transactionType") val transactionType: String,
+        @SerializedName("icon") val icon: String,
+        @SerializedName("formattedTimestamp") val formattedTimestamp: String
+    )
+
+    // Data class untuk Pagination
+    data class Pagination(
+        @SerializedName("currentPage") val currentPage: Int,
+        @SerializedName("totalPages") val totalPages: Int,
+        @SerializedName("totalRecords") val totalRecords: Int,
+        @SerializedName("hasNextPage") val hasNextPage: Boolean,
+        @SerializedName("hasPreviousPage") val hasPreviousPage: Boolean
+    )
+
+    // Response untuk single plant record
+    data class PlantRecordResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("record") val record: PlantRecord
+    )
+
+    // Response untuk all plant records
+    data class AllPlantRecordsResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("totalRecords") val totalRecords: Int,
+        @SerializedName("records") val records: List<PlantRecord>
+    )
+
+    // Response untuk transaction history dengan pagination
+    data class TransactionHistoryResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("plantId") val plantId: String,
+        @SerializedName("data") val data: List<TransactionHistoryItem>,
+        @SerializedName("pagination") val pagination: Pagination
+    )
+
+    // Response untuk record count
+    data class RecordCountResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("recordCount") val recordCount: String
     )
 
 }
