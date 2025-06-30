@@ -70,7 +70,6 @@
 
         val plantUiState by viewModel.uiState
 
-        // Mendestrukturisasi state untuk kemudahan akses
         val plant = plantUiState.selectedPlant
         val avgRating = plantUiState.selectedRating
         val comments = plantUiState.plantComments
@@ -99,17 +98,15 @@
                     Lifecycle.Event.ON_RESUME -> {
                         Log.d("DetailScreen", "App resumed - checking for data refresh")
 
-                        // refresh saat kembali dari metamask
                         if (plant != null) {
                             Log.d("DetailScreen", "Force refreshing plant detail on resume")
                             viewModel.refreshPlantDetail(plantId, null)
                         }
 
-                        // Handle stuck comment loading
                         if (commentPlantState is CommentPlantResult.Loading) {
                             Log.d("DetailScreen", "Comment loading detected on resume - applying timeout")
                             viewModel.viewModelScope.launch {
-                                delay(2500) // Reduced timeout untuk faster response
+                                delay(2500)
                                 if (viewModel.uiState.value.commentPlantState is CommentPlantResult.Loading) {
                                     Log.w("DetailScreen", "Comment timeout - resetting state and refreshing")
                                     viewModel.resetCommentPlantState()
@@ -164,7 +161,7 @@
                 is LikePlantResult.Success -> {
                     Toast.makeText(context, "Aksi like/unlike berhasil", Toast.LENGTH_SHORT).show()
                     viewModel.resetLikePlantState()
-                    delay(2500) // Menununggu 3 detik
+                    delay(2500)
                     viewModel.refreshPlantDetail(plantId, null)
                 }
                 is LikePlantResult.Error -> {
@@ -186,7 +183,7 @@
         LaunchedEffect(ratePlantState) {
             when (ratePlantState) {
                 is RatePlantResult.Loading -> {
-                    delay(10000) // 10 seconds timeout
+                    delay(10000)
                     if (ratePlantState is RatePlantResult.Loading) {
                         Log.w("DetailScreen", "Rate operation timeout - resetting state")
                         viewModel.resetRatePlantState()
@@ -227,7 +224,7 @@
                 }
                 is CommentPlantResult.Loading -> {
                     launch {
-                        delay(10000) // 10 detik timeout
+                        delay(8000)
                         if (commentPlantState is CommentPlantResult.Loading) {
                             Log.w("DetailScreen", "Comment loading timeout - resetting state")
                             viewModel.resetCommentPlantState()

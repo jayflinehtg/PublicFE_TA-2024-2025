@@ -158,7 +158,7 @@ fun AddPlant(
             elevation = CardDefaults.cardElevation(6.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                // Form fields dengan teks hitam
+                // Form fields
                 FormField("Nama Tanaman", namaTanaman, showError && namaTanaman.isBlank()) { namaTanaman = it }
                 FormField("Nama Latin", namaLatin, showError && namaLatin.isBlank()) { namaLatin = it }
                 FormField("Komposisi", komposisi, showError && komposisi.isBlank()) { komposisi = it }
@@ -187,7 +187,7 @@ fun AddPlant(
                     Text("Pilih Gambar", color = Color.White)
                 }
 
-                // Menampilkan preview gambar kalau ada
+                // Menampilkan preview gambar
                 gambarUri?.let { uri ->
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -335,7 +335,7 @@ fun FormField(
             text = label,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
-            color = Color.Black // Warna label hitam
+            color = Color.Black
         )
         OutlinedTextField(
             value = value,

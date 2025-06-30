@@ -2,21 +2,17 @@ package com.example.myapplication.services
 
 import com.example.myapplication.data.DataClassResponses
 import com.example.myapplication.data.DataClassResponses.AverageRatingResponse
-import com.example.myapplication.data.DataClassResponses.CheckWalletRequest
-import com.example.myapplication.data.DataClassResponses.CheckWalletResponse
 import com.example.myapplication.data.DataClassResponses.LoginApiResponse
 import com.example.myapplication.data.DataClassResponses.PrepareRegistrationRequest
 import com.example.myapplication.data.DataClassResponses.RatePlantRequest
-import com.example.myapplication.data.DataClassResponses.RatePlantResponse
 import com.example.myapplication.data.DataClassResponses.ServerLogoutResponse
-import com.example.myapplication.data.DataClassResponses.SimpleResponse
+import com.example.myapplication.data.DataClassResponses.UpdatePlantRecordHashRequest
 import com.example.myapplication.data.DataClassResponses.UserInfoResponse
 import com.example.myapplication.data.IPFSResponse
 import com.example.myapplication.data.LoginRequest
 import com.example.myapplication.data.PaginatedPlantResponse
 import okhttp3.MultipartBody
 import okhttp3.ResponseBody
-import retrofit2.Call
 import retrofit2.http.*
 
 interface ApiService {
@@ -64,7 +60,7 @@ interface ApiService {
     @POST("plants/rate")
     suspend fun prepareRatePlant( // Nama diubah untuk kejelasan
         @Header("Authorization") token: String,
-        @Body request: DataClassResponses.RatePlantRequest
+        @Body request: RatePlantRequest
     ): DataClassResponses.PrepareTransactionApiResponse
 
     @POST("plants/comment")
@@ -98,11 +94,6 @@ interface ApiService {
         @Path("plantId") plantId: String
     ): AverageRatingResponse
 
-    @GET("plants/{plantId}/ratings")
-    suspend fun getPlantRatings(
-        @Path("plantId") plantId: String
-    ): DataClassResponses.PlantRatingsResponse
-
     @GET("plants/{plantId}/comments")
     suspend fun getPaginatedComments( // Nama diubah untuk kejelasan
         @Path("plantId") plantId: String,
@@ -128,6 +119,12 @@ interface ApiService {
     suspend fun getPlantRecord(
         @Path("recordId") recordId: String
     ): DataClassResponses.PlantRecordResponse
+
+    @POST("plants/record/update-hash")
+    suspend fun updatePlantRecordHash(
+        @Header("Authorization") token: String,
+        @Body request: UpdatePlantRecordHashRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
 
     @GET("plants/records/all")
     suspend fun getAllPlantRecords(): DataClassResponses.AllPlantRecordsResponse
