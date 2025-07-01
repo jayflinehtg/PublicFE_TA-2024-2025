@@ -7,5 +7,6 @@ import dagger.hilt.android.HiltAndroidApp
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        // Inisialisasi lainnya jika perlu
     }
 }

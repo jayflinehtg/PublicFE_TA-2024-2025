@@ -14,6 +14,16 @@ class DataClassResponses {
         @SerializedName("data") val data: TransactionData?
     )
 
+    data class CheckWalletRequest(
+        val walletAddress: String
+    )
+
+    data class CheckWalletResponse(
+        val success: Boolean,
+        val message: String? = null,
+        val data: CheckWalletData? = null
+    )
+
     data class CheckWalletData(
         val isRegistered: Boolean,
         val walletAddress: String
@@ -121,6 +131,12 @@ class DataClassResponses {
         @SerializedName("rating") val rating: Int
     )
 
+    data class RatePlantResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("message") val message: String,
+        @SerializedName("txHash") val txHash: String?
+    )
+
     data class RatedPlant(
         val plant: PlantResponse,
         val averageRating: Double
@@ -135,6 +151,14 @@ class DataClassResponses {
     data class CommentRequest(
         @SerializedName("plantId") val plantId: String,
         @SerializedName("comment") val comment: String
+    )
+
+    // Response umum untuk like dan komentar
+    data class SimpleResponse(
+        @SerializedName("success") val success: Boolean,
+        @SerializedName("message") val message: String,
+        @SerializedName("txHash") val txHash: String,
+        @SerializedName("plantId") val plantId: String
     )
 
     /* ============================ RECORD TANAMAN =========================== */
@@ -157,12 +181,6 @@ class DataClassResponses {
         @SerializedName("transactionType") val transactionType: String,
         @SerializedName("icon") val icon: String,
         @SerializedName("formattedTimestamp") val formattedTimestamp: String
-    )
-
-    // data class untuk update transaction hash
-    data class UpdatePlantRecordHashRequest(
-        val recordId: Int,
-        val txHash: String
     )
 
     // Data class untuk Pagination

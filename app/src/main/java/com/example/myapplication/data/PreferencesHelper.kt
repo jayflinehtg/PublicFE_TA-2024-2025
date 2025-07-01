@@ -29,6 +29,10 @@ object PreferencesHelper {
         getPrefs(context).edit { putBoolean(KEY_IS_USER_REGISTERED, isRegistered) }
     }
 
+    fun isUserRegistered(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_IS_USER_REGISTERED, false)
+    }
+
     fun saveWalletAddress(context: Context, walletAddress: String) {
         getPrefs(context).edit { putString(KEY_WALLET_ADDRESS, walletAddress) }
     }

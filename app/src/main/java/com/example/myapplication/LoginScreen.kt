@@ -50,6 +50,7 @@ fun LoginScreen(
     val loginState = uiState.loginState
     val isFormEnabled = loginState !is LoginResult.Loading && !uiState.isConnecting
 
+    // Pengecekan wallet address saat layar pertama kali muncul atau saat uiState.walletAddress berubah
     LaunchedEffect(uiState.walletAddress, uiState.isGuest) {
         if (uiState.walletAddress.isNullOrEmpty() && !uiState.isGuest) {
             Toast.makeText(context, "Wallet tidak terhubung. Silakan hubungkan wallet Anda.", Toast.LENGTH_LONG).show()
@@ -181,13 +182,14 @@ fun LoginScreen(
                     Button(
                         onClick = {
                             passwordErrorLocal = null
-                            viewModel.resetLoginState()
+                            viewModel.resetLoginState() // Reset state error sebelumnya
 
                             if (password.isBlank()) {
                                 passwordErrorLocal = "Kata sandi tidak boleh kosong."
                                 return@Button
                             }
 
+                            // Wallet address akan diambil oleh ViewModel dari ethereum.selectedAddress
                             Log.d("LoginScreen_Button", "Memanggil viewModel.performLogin")
                             viewModel.performLogin(password)
                         },

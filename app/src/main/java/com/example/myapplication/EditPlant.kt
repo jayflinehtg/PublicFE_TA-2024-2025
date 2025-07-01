@@ -45,6 +45,7 @@ fun EditPlantScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // Observasi state dari ViewModel
     val plantUiState by viewModel.uiState
     val plantToEdit = plantUiState.selectedPlant
     val editPlantState = plantUiState.editPlantState
@@ -52,6 +53,7 @@ fun EditPlantScreen(
 
     val ipfsUploadState = plantUiState.ipfsUploadState
 
+    // State untuk form
     var namaTanaman by remember { mutableStateOf("") }
     var namaLatin by remember { mutableStateOf("") }
     var komposisi by remember { mutableStateOf("") }
@@ -62,8 +64,10 @@ fun EditPlantScreen(
 
     var ipfsHash by remember { mutableStateOf("") }
 
+    // State lokal untuk gambar baru
     var newImageUri by remember { mutableStateOf<Uri?>(null) }
 
+    // State lokal untuk validasi UI
     var namaTanamanError by remember { mutableStateOf<String?>(null) }
     var namaLatinError by remember { mutableStateOf<String?>(null) }
     var komposisiError by remember { mutableStateOf<String?>(null)}
@@ -77,6 +81,7 @@ fun EditPlantScreen(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri ->
             newImageUri = uri
+            // Reset IPFS state saat pilih gambar baru
             if (uri != null) {
                 viewModel.resetIPFSUploadState()
             }
@@ -215,7 +220,7 @@ fun EditPlantScreen(
                         Text("Pilih Gambar Baru", color = Color.White)
                     }
 
-                    // Tampilkan preview gambar baru
+                    // Tampilkan preview gambar baru jika dipilih
                     newImageUri?.let { uri ->
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
@@ -239,6 +244,7 @@ fun EditPlantScreen(
                                 .height(200.dp)
                                 .padding(4.dp)
                                 .then(
+                                    // Visual indicator untuk status
                                     when (ipfsUploadState) {
                                         is IPFSUploadResult.Success -> Modifier.background(
                                             Color(0xFF4CAF50).copy(alpha = 0.1f),
@@ -285,7 +291,7 @@ fun EditPlantScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // TOMBOL SIMPAN PERUBAHAN
+                    // --- TOMBOL SIMPAN PERUBAHAN ---
                     Button(
                         onClick = {
                             var hasError = false
@@ -400,7 +406,7 @@ fun FormField(
             singleLine = false,
             keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Text),
             textStyle = TextStyle(color = Color.Black, fontSize = 14.sp),
-            isError = displayErrorText != null,
+            isError = displayErrorText != null, // Cek jika ada error yang perlu ditampilkan
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 4.dp),
@@ -415,7 +421,7 @@ fun FormField(
                 )
             }
         )
-        if (displayErrorText != null) {
+        if (displayErrorText != null) { // Tampilkan error jika ada
             Text(
                 text = displayErrorText,
                 color = Color.Red,

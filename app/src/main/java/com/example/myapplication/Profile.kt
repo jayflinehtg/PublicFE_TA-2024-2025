@@ -49,7 +49,7 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
 
                     if (logoutState is LogoutResult.Success) {
                         Log.d("ProfileScreen", "Logout success detected on resume - navigating immediately")
-                        navController.navigate(Screen.WalletComponent.route) {
+                        navController.navigate("walletconnect") {
                             popUpTo(0) { inclusive = true }
                         }
                     }
@@ -62,7 +62,7 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
                             if (viewModel.uiState.value.logoutState is LogoutResult.Loading) {
                                 Log.w("ProfileScreen", "Logout timeout - forcing navigation")
                                 viewModel.resetLogoutState()
-                                navController.navigate(Screen.WalletComponent.route) {
+                                navController.navigate("walletconnect") {
                                     popUpTo(0) { inclusive = true }
                                 }
                             }
@@ -112,7 +112,7 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
                 Toast.makeText(context, "Logout berhasil", Toast.LENGTH_SHORT).show()
                 viewModel.resetLogoutState()
 
-                navController.navigate(Screen.WalletComponent.route) {
+                navController.navigate("walletconnect") {
                     popUpTo(0) { inclusive = true }
                 }
             }
@@ -133,11 +133,11 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
             is LogoutResult.Loading -> {
                 Log.d("ProfileScreen", "Logout loading state active")
                 launch {
-                    delay(5000)
+                    delay(5000) // 10 seconds timeout
                     if (logoutState is LogoutResult.Loading) {
                         Log.w("ProfileScreen", "Logout loading timeout - forcing navigation")
                         viewModel.resetLogoutState()
-                        navController.navigate(Screen.WalletComponent.route) {
+                        navController.navigate("walletconnect") {
                             popUpTo(0) { inclusive = true }
                         }
                     }
@@ -223,7 +223,7 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
                         }
                         displayWalletAddress.isNotEmpty() -> {
                             Log.d("ProfileScreen", "User terhubung tapi belum login, hanya disconnect wallet...")
-                            viewModel.logoutAndDisconnect()
+                            viewModel.logoutAndDisconnect() // Tetap gunakan fungsi yang sama untuk konsistensi
                         }
                         else -> {
                             Log.w("ProfileScreen", "Kondisi tidak valid untuk logout")
@@ -235,7 +235,7 @@ fun Profile(navController: NavController, viewModel: MainViewModel = hiltViewMod
                 modifier = Modifier
                     .fillMaxWidth(0.8f)
                     .height(50.dp),
-                enabled = !isLogoutInProgress
+                enabled = !isLogoutInProgress // Disable saat proses logout berlangsung
             ) {
                 if (isLogoutInProgress) {
                     Row(

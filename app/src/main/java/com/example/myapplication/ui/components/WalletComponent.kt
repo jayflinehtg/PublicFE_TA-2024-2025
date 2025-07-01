@@ -16,6 +16,7 @@ import com.example.myapplication.data.EventSink
 @Composable
 fun WalletComponent(
     isConnecting: Boolean,
+//    balance: String?,
     isGuest: Boolean,
     eventSink: (EventSink) -> Unit
 ) {

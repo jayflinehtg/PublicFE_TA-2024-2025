@@ -16,8 +16,8 @@ class RetrofitClient @Inject constructor(
 ) {
 
     companion object {
-        const val BASE_URL = "http://172.26.42.79:5000/api/"
-        const val SMART_CONTRACT_ADDRESS = "0xD094b871EB4020b4FcE4B74c4D2025d096E0E0c5"
+        const val BASE_URL = "http://192.168.1.100:5000/api/"
+        const val SMART_CONTRACT_ADDRESS = "0x081E74aB352C9f439E27f21645FCD63D4847B309"
         const val PUBLIC_RPC_URL = "https://tea-sepolia.g.alchemy.com/public"
     }
 

@@ -52,6 +52,16 @@ class MainViewModel @Inject constructor(
     )
     val uiState = _uiState.asStateFlow()
 
+    val userToken: String
+        get() {
+            val jwtToken = PreferencesHelper.getJwtToken(context)
+            return if (jwtToken != null && !jwtToken.startsWith("Bearer ", ignoreCase = true)) {
+                "Bearer $jwtToken"
+            } else {
+                jwtToken ?: ""
+            }
+        }
+
     private fun sendUiMessage(message: String) {
         viewModelScope.launch {
             _uiEvent.emit(UiEvent.Message(message))
@@ -96,6 +106,7 @@ class MainViewModel @Inject constructor(
                     }
                     response.userData.fullName?.let { PreferencesHelper.saveUserFullName(context, it) }
                 } else {
+                    // Karena tidak ada response.message, gunakan pesan default
                     Log.w("MainViewModel_Fetch", "Gagal mengambil info pengguna (success=false)")
                     onAuthFailure?.invoke()
                     sendUiMessage("Gagal memuat data pengguna.")
@@ -279,7 +290,7 @@ class MainViewModel @Inject constructor(
                         "Error dari server: ${e.message()}"
                     }
 
-                    // Handle specific login errors
+                    // **Handle specific login errors**
                     when {
                         errorMessage.contains("Password salah", ignoreCase = true) -> {
                             Log.d("MainViewModel_Login", "Password salah, tidak akan menampilkan MetaMask")
@@ -361,7 +372,7 @@ class MainViewModel @Inject constructor(
                     PreferencesHelper.clearJwtToken(context)
                     Log.e("MainViewModel_Login", "Proses login gagal: ${throwable.message}", throwable)
 
-                    // Enhanced error classification
+                    // **Enhanced error classification**
                     val errorMessage = throwable.message ?: "Terjadi kesalahan login"
                     when {
                         errorMessage.contains("Password salah", ignoreCase = true) -> {
@@ -440,6 +451,7 @@ class MainViewModel @Inject constructor(
                         Log.w("MainViewModel_Logout", "Logout sisi server tidak sukses: ${serverResponse.message}")
                         serverMessage = serverResponse.message ?: "Gagal logout dari server."
 
+                        // Jika server response tidak sukses, tetap lanjutkan proses cleanup
                         throw Exception(serverMessage)
                     }
                 } catch (e: Exception) {
@@ -451,6 +463,8 @@ class MainViewModel @Inject constructor(
                         Log.d("MainViewModel_Logout", "Token expired, lanjutkan proses logout on-chain")
                         serverMessage = "Token sudah kedaluwarsa. Logout dianggap berhasil."
 
+                        // Tetap perlu data transaksi untuk logout on-chain
+                        // Server middleware akan tetap memberikan logoutTransactionData meski token expired
                     } else {
                         // Untuk error lain, tetap lanjutkan cleanup tapi catat error
                         serverMessage = "Logout server gagal: ${e.message}. Melanjutkan cleanup lokal."
@@ -618,6 +632,12 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun performCleanupAndNavigate() {
+        cleanupLocalSessionData(navigateToWallet = false)
+        disconnectWallet()
+        _uiState.update { it.copy(shouldCleanupAfterLogout = false) }
+    }
+
     private fun connectWallet() {
         Log.d("MainViewModel_Connect", "connectWallet DIPANGGIL")
         viewModelScope.launch {
@@ -630,7 +650,7 @@ class MainViewModel @Inject constructor(
                     if (userWalletAddress.isNotEmpty()) {
                         Log.d("MainViewModel_Connect", "Alamat terdeteksi: '$userWalletAddress', memproses...")
                         PreferencesHelper.saveMetaMaskConnectionStatus(context, true)
-                        PreferencesHelper.saveWalletAddress(context, userWalletAddress)
+                        PreferencesHelper.saveWalletAddress(context, userWalletAddress)  // Pastikan wallet address disimpan di sini
                         _uiState.update {
                             it.copy(
                                 walletAddress = userWalletAddress,
@@ -716,7 +736,7 @@ class MainViewModel @Inject constructor(
                     Log.w("MainViewModel_Init", "Auth failure dari server saat init. Membersihkan sesi lokal (token & nama).")
                     cleanupLocalSessionData(navigateToWallet = false)
                     viewModelScope.launch {
-                        _uiEvent.emit(UiEvent.NavigateTo(Screen.Login.route))
+                        _uiEvent.emit(UiEvent.NavigateTo(Screen.Login.route)) // Arahkan ke Login jika token tidak valid
                         _uiEvent.emit(UiEvent.Message("Sesi Anda telah berakhir. Silakan login kembali."))
                     }
                 }

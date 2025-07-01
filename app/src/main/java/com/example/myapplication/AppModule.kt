@@ -26,11 +26,12 @@ internal object AppModule {
      */
     @Provides
     fun provideDappMetadata(@ApplicationContext context: Context): DappMetadata {
+        // Anda bisa menyesuaikan nama dan URL ini agar lebih deskriptif untuk DApp Anda
         val appName = context.applicationInfo.loadLabel(context.packageManager).toString().replace(" ", "").toLowerCase()
         return DappMetadata(
-            name = context.applicationInfo.loadLabel(context.packageManager).toString(),
-            url = "https://${appName}.tea.xyz",
-            iconUrl = "https://cdn.sstatic.net/Sites/stackoverflow/Img/apple-touch-icon.png"
+            name = context.applicationInfo.loadLabel(context.packageManager).toString(), // Nama aplikasi Anda
+            url = "https://${appName}.tea.xyz", // Ganti dengan URL DApp Anda yang sebenarnya
+            iconUrl = "https://cdn.sstatic.net/Sites/stackoverflow/Img/apple-touch-icon.png" // Ganti dengan URL ikon DApp Anda
         )
     }
 
