@@ -49,9 +49,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.example.myapplication.data.DataClassResponses.UpdatePlantRecordHashRequest
 import com.example.myapplication.data.IPFSUploadResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 @HiltViewModel
 class PlantViewModel @Inject constructor(
@@ -98,15 +100,47 @@ class PlantViewModel @Inject constructor(
     private suspend fun sendPlantTransaction(transactionDataHex: String, actionNameForLog: String)
     : Result {
         val userWalletAddress = try {
-            ethereum.selectedAddress.takeIf { !it.isNullOrEmpty() }
-                ?: PreferencesHelper.getWalletAddress(context)
-                ?: throw ViewModelValidationException("Tidak dapat mendapatkan alamat wallet untuk transaksi.")
+            var walletAddress = ethereum.selectedAddress
+            Log.d("PlantViewModel_$actionNameForLog", "Initial ethereum.selectedAddress: '$walletAddress'")
+
+            if (walletAddress.isNullOrEmpty()) {
+                Log.w("PlantViewModel_$actionNameForLog", "selectedAddress empty, attempting reconnect...")
+
+                when (val connectResult = ethereum.connect()) {
+                    is Result.Success -> {
+                        walletAddress = ethereum.selectedAddress
+                        Log.d("PlantViewModel_$actionNameForLog", "Reconnect successful, new address: '$walletAddress'")
+
+                        if (walletAddress.isNotEmpty()) {
+                            PreferencesHelper.saveWalletAddress(context, walletAddress)
+                            PreferencesHelper.saveMetaMaskConnectionStatus(context, true)
+                        }
+                    }
+                    is Result.Error -> {
+                        val error = connectResult.error
+                        Log.e("PlantViewModel_$actionNameForLog", "Reconnect failed: ${error.message}")
+
+                        if (error.code == 4001) {
+                            throw ViewModelValidationException("User menolak koneksi wallet untuk transaksi")
+                        } else {
+                            throw ViewModelValidationException("Gagal menghubungkan wallet: ${error.message}")
+                        }
+                    }
+                }
+            }
+
+            // Step 3: Final validation
+            if (walletAddress.isNullOrEmpty()) {
+                throw ViewModelValidationException("Tidak dapat mendapatkan alamat wallet untuk transaksi")
+            }
+
+            walletAddress
         } catch (e: Exception) {
             Log.e("PlantViewModel_$actionNameForLog", "Error getting wallet address: ${e.message}")
-            throw ViewModelValidationException("Tidak dapat mendapatkan alamat wallet untuk transaksi.")
+            throw ViewModelValidationException("Error wallet connection: ${e.message}")
         }
 
-        Log.d("PlantViewModel_$actionNameForLog", "Menggunakan wallet address: $userWalletAddress")
+        Log.d("PlantViewModel_$actionNameForLog", "Final wallet address: $userWalletAddress")
 
         val contractAddress = RetrofitClient.SMART_CONTRACT_ADDRESS
         if (contractAddress.isBlank()) {
@@ -116,13 +150,24 @@ class PlantViewModel @Inject constructor(
             throw ViewModelValidationException("Data transaksi dari server tidak valid.")
         }
 
-        val txParams = mapOf("from" to userWalletAddress, "to" to contractAddress, "data" to transactionDataHex)
-        val request = EthereumRequest(method = EthereumMethod.ETH_SEND_TRANSACTION.value, params = listOf(txParams))
-        Log.d("PlantViewModel_$actionNameForLog", "Mengirim permintaan transaksi: $request")
-        return try {
-            val result = ethereum.sendRequest(request)
+        val txParams = mapOf(
+            "from" to userWalletAddress,
+            "to" to contractAddress,
+            "data" to transactionDataHex
+        )
 
-            // Log transaction result untuk debugging
+        val request = EthereumRequest(
+            method = EthereumMethod.ETH_SEND_TRANSACTION.value,
+            params = listOf(txParams)
+        )
+
+        Log.d("PlantViewModel_$actionNameForLog", "Sending transaction request: $request")
+
+        return try {
+            val result = withTimeout(10000) { // 10 seconds timeout
+                ethereum.sendRequest(request)
+            }
+
             when (result) {
                 is Result.Success.Item -> {
                     Log.d("PlantViewModel_$actionNameForLog", "Transaction successful: ${result.value}")
@@ -139,6 +184,9 @@ class PlantViewModel @Inject constructor(
             }
 
             result
+        } catch (e: TimeoutCancellationException) {
+            Log.e("PlantViewModel_$actionNameForLog", "Transaction timeout - user might not have responded to MetaMask")
+            throw ViewModelValidationException("Transaksi timeout. Pastikan Anda merespon permintaan di MetaMask.")
         } catch (e: Exception) {
             Log.e("PlantViewModel_$actionNameForLog", "Exception during transaction: ${e.message}")
             throw e
