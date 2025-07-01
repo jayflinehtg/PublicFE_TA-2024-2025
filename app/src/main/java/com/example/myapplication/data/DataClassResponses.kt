@@ -171,6 +171,11 @@ class DataClassResponses {
         @SerializedName("timestamp") val timestamp: String
     )
 
+    data class UpdatePlantRecordHashRequest(
+        val recordId: Int,
+        val txHash: String
+    )
+
     // Data class untuk Transaction History Item
     data class TransactionHistoryItem(
         @SerializedName("recordId") val recordId: String,

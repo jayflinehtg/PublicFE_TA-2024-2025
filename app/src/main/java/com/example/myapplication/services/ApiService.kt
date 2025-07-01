@@ -10,6 +10,7 @@ import com.example.myapplication.data.DataClassResponses.RatePlantRequest
 import com.example.myapplication.data.DataClassResponses.RatePlantResponse
 import com.example.myapplication.data.DataClassResponses.ServerLogoutResponse
 import com.example.myapplication.data.DataClassResponses.SimpleResponse
+import com.example.myapplication.data.DataClassResponses.UpdatePlantRecordHashRequest
 import com.example.myapplication.data.DataClassResponses.UserInfoResponse
 import com.example.myapplication.data.IPFSResponse
 import com.example.myapplication.data.LoginRequest
@@ -128,6 +129,12 @@ interface ApiService {
     suspend fun getPlantRecord(
         @Path("recordId") recordId: String
     ): DataClassResponses.PlantRecordResponse
+
+    @POST("plants/record/update-hash")
+    suspend fun updatePlantRecordHash(
+        @Header("Authorization") token: String,
+        @Body request: UpdatePlantRecordHashRequest
+    ): DataClassResponses.PrepareTransactionApiResponse
 
     @GET("plants/records/all")
     suspend fun getAllPlantRecords(): DataClassResponses.AllPlantRecordsResponse

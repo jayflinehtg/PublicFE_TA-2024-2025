@@ -46,6 +46,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.example.myapplication.data.DataClassResponses.UpdatePlantRecordHashRequest
 import com.example.myapplication.data.IPFSUploadResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -209,7 +210,8 @@ class PlantViewModel @Inject constructor(
                     throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
                 }
 
-                val transactionDataHex = prepareResponse.data.transactionData
+                val transactionDataHex = prepareResponse.data?.transactionData
+                    ?: throw ViewModelValidationException("Transaction data tidak tersedia")
 
                 Log.d("PlantViewModel_Add", "Memulai transaksi on-chain untuk add plant...")
 
@@ -218,11 +220,22 @@ class PlantViewModel @Inject constructor(
                 when(val specificResult = transactionResult) {
                     is Result.Success.Item -> {
                         val txHash = specificResult.value
+                        try {
+                            // Get current record count untuk determine recordId
+                            val recordCountResponse = apiService.getRecordCount()
+                            val currentRecordId = (recordCountResponse.recordCount.toInt() - 1)
+
+                            // Update plant record dengan txHash yang sebenarnya
+                            updatePlantRecordWithTxHash(currentRecordId, txHash)
+
+                            Log.d("PlantViewModel_Add", "Plant record updated with txHash: $txHash")
+                        } catch (e: Exception) {
+                            Log.w("PlantViewModel_Add", "Failed to update plant record: ${e.message}")
+                        }
                         if(txHash.isNotEmpty()) txHash else throw Exception("Add plant on-chain sukses tapi txHash tidak valid: $txHash")
                     }
                     is Result.Error -> {
                         val error = specificResult.error
-
                         if (error.code == 4001 || error.message.contains("user rejected", ignoreCase = true)) {
                             throw Exception("User membatalkan transaksi add plant")
                         } else {
@@ -372,7 +385,8 @@ class PlantViewModel @Inject constructor(
                     throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
                 }
 
-                val transactionDataHex = prepareResponse.data.transactionData
+                val transactionDataHex = prepareResponse.data?.transactionData
+                    ?: throw ViewModelValidationException("Transaction data tidak tersedia")
 
                 Log.d("PlantViewModel_Edit", "Memulai transaksi on-chain untuk edit plant...")
 
@@ -381,6 +395,18 @@ class PlantViewModel @Inject constructor(
                 when(val specificResult = transactionResult) {
                     is Result.Success.Item -> {
                         val txHash = specificResult.value
+                        try {
+                            // Get current record count untuk determine recordId
+                            val recordCountResponse = apiService.getRecordCount()
+                            val currentRecordId = (recordCountResponse.recordCount.toInt() - 1) // Record yang baru dibuat
+
+                            // Update plant record dengan txHash yang baru
+                            updatePlantRecordWithTxHash(currentRecordId, txHash)
+
+                            Log.d("PlantViewModel_Edit", "Plant record updated with txHash: $txHash")
+                        } catch (e: Exception) {
+                            Log.w("PlantViewModel_Edit", "Failed to update plant record: ${e.message}")
+                        }
                         if(txHash.isNotEmpty()) txHash else throw Exception("Edit plant on-chain sukses tapi txHash tidak valid: $txHash")
                     }
                     is Result.Error -> {
@@ -422,6 +448,38 @@ class PlantViewModel @Inject constructor(
                 val currentToken = PreferencesHelper.getJwtToken(context)
                 fetchPlantDetail(request.plantId, currentToken?.let { "Bearer $it" })
             }
+        }
+    }
+
+    // Fungsi Update Transaction Hash
+    private suspend fun updatePlantRecordWithTxHash(recordId: Int, txHash: String) {
+        try {
+            val currentToken = PreferencesHelper.getJwtToken(context)
+
+            // Call backend endpoint untuk prepare update transaction
+            val updateRequest = UpdatePlantRecordHashRequest(recordId, txHash)
+            val response = apiService.updatePlantRecordHash("Bearer $currentToken", updateRequest)
+
+            if (response.success && response.data?.transactionData != null) {
+                val transactionDataHex = response.data?.transactionData
+                    ?: throw ViewModelValidationException("Update transaction data tidak tersedia")
+
+                // Execute update transaction hash
+                val updateResult = sendPlantTransaction(transactionDataHex, "UpdatePlantRecord")
+
+                when (updateResult) {
+                    is Result.Success.Item -> {
+                        Log.d("PlantViewModel", "Plant record updated successfully with txHash: $txHash")
+                    }
+                    else -> {
+                        Log.w("PlantViewModel", "Failed to update plant record hash")
+                    }
+                }
+            } else {
+                Log.w("PlantViewModel", "Failed to prepare update transaction: ${response.message}")
+            }
+        } catch (e: Exception) {
+            Log.e("PlantViewModel", "Failed to update plant record with txHash: ${e.message}")
         }
     }
 
@@ -671,7 +729,8 @@ class PlantViewModel @Inject constructor(
                     throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
                 }
 
-                val transactionDataHex = prepareResponse.data.transactionData
+                val transactionDataHex = prepareResponse.data?.transactionData
+                    ?: throw ViewModelValidationException("Transaction data tidak tersedia")
 
                 Log.d("PlantViewModel_Comment", "Memulai transaksi on-chain untuk comment plant...")
 
@@ -776,7 +835,8 @@ class PlantViewModel @Inject constructor(
                     throw ViewModelValidationException(prepareResponse.message ?: "Gagal mempersiapkan data transaksi.")
                 }
 
-                val transactionDataHex = prepareResponse.data.transactionData
+                val transactionDataHex = prepareResponse.data?.transactionData
+                    ?: throw ViewModelValidationException("Transaction data tidak tersedia")
 
                 Log.d("PlantViewModel_Rate", "Memulai transaksi on-chain untuk rate plant...")
 
